@@ -1,0 +1,20 @@
+{
+  "name": "smartshop-ai",
+  "version": "0.1.0",
+  "private": true,
+  "description": "SmartShop AI — monorepo root",
+  "scripts": {
+    "dev:backend": "npm run start:dev --prefix backend",
+    "dev:frontend": "npm run dev --prefix frontend",
+    "build:backend": "npm run build --prefix backend",
+    "build:frontend": "npm run build --prefix frontend",
+    "build:shared": "npm run build --prefix shared",
+    "lint:backend": "npm run lint --prefix backend",
+    "lint:frontend": "npm run lint --prefix frontend",
+    "db:up": "docker-compose up -d postgres redis",
+    "db:migrate": "npm run prisma:migrate --prefix backend",
+    "db:seed": "npm run prisma:seed --prefix backend",
+    "db:studio": "npm run prisma:studio --prefix backend",
+    "install:all": "npm install --prefix shared && npm install --prefix backend && npm install --prefix frontend"
+  }
+}
