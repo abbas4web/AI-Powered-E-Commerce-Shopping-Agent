@@ -10,13 +10,9 @@ var __metadata = (this && this.__metadata) || function (k, v) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ChatRequestDto = void 0;
-const openapi = require("@nestjs/swagger");
 const class_validator_1 = require("class-validator");
 const swagger_1 = require("@nestjs/swagger");
 class ChatRequestDto {
-    static _OPENAPI_METADATA_FACTORY() {
-        return { message: { required: true, type: () => String, minLength: 1, maxLength: 2000 }, conversationId: { required: false, type: () => String } };
-    }
 }
 exports.ChatRequestDto = ChatRequestDto;
 __decorate([

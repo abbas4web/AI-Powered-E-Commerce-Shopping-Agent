@@ -10,7 +10,6 @@ var __metadata = (this && this.__metadata) || function (k, v) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ProductSearchDto = void 0;
-const openapi = require("@nestjs/swagger");
 const class_validator_1 = require("class-validator");
 const class_transformer_1 = require("class-transformer");
 const swagger_1 = require("@nestjs/swagger");
@@ -18,9 +17,6 @@ class ProductSearchDto {
     constructor() {
         this.page = 1;
         this.limit = 20;
-    }
-    static _OPENAPI_METADATA_FACTORY() {
-        return { query: { required: false, type: () => String }, categoryId: { required: false, type: () => String }, brandId: { required: false, type: () => String }, minPrice: { required: false, type: () => Number, minimum: 0 }, maxPrice: { required: false, type: () => Number, minimum: 0 }, page: { required: false, type: () => Number, default: 1, minimum: 1 }, limit: { required: false, type: () => Number, default: 20, minimum: 1 } };
     }
 }
 exports.ProductSearchDto = ProductSearchDto;

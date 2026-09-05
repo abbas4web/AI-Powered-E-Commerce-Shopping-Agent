@@ -10,13 +10,9 @@ var __metadata = (this && this.__metadata) || function (k, v) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.UpdatePreferencesDto = void 0;
-const openapi = require("@nestjs/swagger");
 const class_validator_1 = require("class-validator");
 const swagger_1 = require("@nestjs/swagger");
 class UpdatePreferencesDto {
-    static _OPENAPI_METADATA_FACTORY() {
-        return { preferredBrands: { required: false, type: () => [String] }, preferredCategories: { required: false, type: () => [String] }, budgetMin: { required: false, type: () => Number, minimum: 0 }, budgetMax: { required: false, type: () => Number, minimum: 0 }, useCases: { required: false, type: () => [String] }, performancePreference: { required: false, type: () => Number, minimum: 1, maximum: 5 }, batteryPreference: { required: false, type: () => Number, minimum: 1, maximum: 5 }, cameraPreference: { required: false, type: () => Number, minimum: 1, maximum: 5 }, designPreference: { required: false, type: () => Number, minimum: 1, maximum: 5 } };
-    }
 }
 exports.UpdatePreferencesDto = UpdatePreferencesDto;
 __decorate([

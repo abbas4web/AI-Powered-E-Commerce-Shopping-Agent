@@ -4,7 +4,7 @@
   "description": "SmartShop AI — NestJS Backend API",
   "private": true,
   "scripts": {
-    "build": "nest build",
+    "build": "rimraf dist tsconfig.tsbuildinfo && nest build",
     "start": "node dist/main",
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
@@ -46,12 +46,13 @@
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
     "passport-local": "^1.0.0",
+    "prisma": "^5.18.0",
     "reflect-metadata": "^0.2.2",
+    "rimraf": "^6.1.3",
     "rxjs": "^7.8.1",
     "uuid": "^10.0.0",
     "winston": "^3.14.2",
-    "zod": "^3.23.8",
-    "prisma": "^5.18.0"
+    "zod": "^3.23.8"
   },
   "devDependencies": {
     "@nestjs/schematics": "^10.1.4",

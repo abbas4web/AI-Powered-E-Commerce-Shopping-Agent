@@ -13,7 +13,6 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.WishlistController = void 0;
-const openapi = require("@nestjs/swagger");
 const common_1 = require("@nestjs/common");
 const swagger_1 = require("@nestjs/swagger");
 const wishlist_service_1 = require("./wishlist.service");
@@ -37,7 +36,6 @@ exports.WishlistController = WishlistController;
 __decorate([
     (0, common_1.Get)(),
     (0, swagger_1.ApiOperation)({ summary: 'Get current user wishlist' }),
-    openapi.ApiResponse({ status: 200, type: [Object] }),
     __param(0, (0, current_user_decorator_1.CurrentUser)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object]),
@@ -46,7 +44,6 @@ __decorate([
 __decorate([
     (0, common_1.Post)(),
     (0, swagger_1.ApiOperation)({ summary: 'Add product to wishlist' }),
-    openapi.ApiResponse({ status: 201, type: Object }),
     __param(0, (0, current_user_decorator_1.CurrentUser)()),
     __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),
@@ -56,7 +53,6 @@ __decorate([
 __decorate([
     (0, common_1.Delete)(':productId'),
     (0, swagger_1.ApiOperation)({ summary: 'Remove product from wishlist' }),
-    openapi.ApiResponse({ status: 200 }),
     __param(0, (0, current_user_decorator_1.CurrentUser)()),
     __param(1, (0, common_1.Param)('productId')),
     __metadata("design:type", Function),

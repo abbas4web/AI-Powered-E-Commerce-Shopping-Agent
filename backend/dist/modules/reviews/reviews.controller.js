@@ -13,7 +13,6 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ReviewsController = void 0;
-const openapi = require("@nestjs/swagger");
 const common_1 = require("@nestjs/common");
 const swagger_1 = require("@nestjs/swagger");
 const reviews_service_1 = require("./reviews.service");
@@ -31,7 +30,6 @@ __decorate([
     (0, public_decorator_1.Public)(),
     (0, common_1.Get)(),
     (0, swagger_1.ApiOperation)({ summary: 'Get reviews for a product' }),
-    openapi.ApiResponse({ status: 200, type: [Object] }),
     __param(0, (0, common_1.Param)('productId')),
     __param(1, (0, common_1.Query)('limit')),
     __metadata("design:type", Function),
