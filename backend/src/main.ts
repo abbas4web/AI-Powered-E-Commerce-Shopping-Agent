@@ -19,8 +19,19 @@ async function bootstrap() {
 
   // ─── CORS ────────────────────────────────────────────────────────────────
   const frontendUrl = configService.get<string>('app.frontendUrl') ?? 'http://localhost:3000';
+  const isDev = configService.get<string>('app.nodeEnv') !== 'production';
+
   app.enableCors({
-    origin: frontendUrl,
+    origin: isDev
+      ? (origin: string | undefined, cb: (err: Error | null, allow: boolean) => void) => {
+          // Allow all localhost origins in development (any port)
+          if (!origin || /^http:\/\/localhost(:\d+)?$/.test(origin)) {
+            cb(null, true);
+          } else {
+            cb(new Error(`CORS blocked: ${origin}`), false);
+          }
+        }
+      : frontendUrl,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'x-request-id'],
