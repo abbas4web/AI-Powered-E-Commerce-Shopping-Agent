@@ -18,7 +18,7 @@ export function ProductListingPage() {
     queryKey: ['products', query, page],
     queryFn: () =>
       apiClient.get<PaginatedResult<ProductSummary>>(
-        `/products/search?query=${encodeURIComponent(query)}&page=${page}&limit=20`,
+        `/search?query=${encodeURIComponent(query)}&page=${page}&limit=20`,
       ),
   });
 

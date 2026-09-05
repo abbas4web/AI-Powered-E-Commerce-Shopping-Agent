@@ -5,7 +5,7 @@ import { ProductSearchDto } from './dto/product-search.dto';
 import { Public } from '../../common/decorators/public.decorator';
 
 @ApiTags('Search')
-@Controller('products/search')
+@Controller('search')
 export class SearchController {
   constructor(private readonly searchService: SearchService) {}
 
