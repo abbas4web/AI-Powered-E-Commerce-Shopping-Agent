@@ -1,9 +1,9 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useRef, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Send, Sparkles, Loader2 } from 'lucide-react';
+import { Send, Sparkles, Loader2, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -12,14 +12,8 @@ import { ProductRecommendationCard } from './product-recommendation-card';
 import { chatSchema, type ChatFormValues } from '@/lib/validations';
 import { apiClient } from '@/lib/api-client';
 import { toast } from '@/hooks/use-toast';
+import { useChatStore } from '@/store/chat.store';
 import type { ChatResponse } from '@smartshop/shared';
-
-interface Message {
-  role: 'user' | 'assistant';
-  content: string;
-  response?: ChatResponse;
-  timestamp: string;
-}
 
 const STARTER_PROMPTS = [
   'I need a laptop under ₹80,000 for Flutter development with 16GB RAM',
@@ -29,9 +23,17 @@ const STARTER_PROMPTS = [
 ];
 
 export function ChatInterface() {
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [conversationId, setConversationId] = useState<string | undefined>();
-  const [isLoading, setIsLoading] = useState(false);
+  const {
+    messages,
+    conversationId,
+    isLoading,
+    addMessage,
+    setConversationId,
+    setLoading,
+    clearChat,
+    removeLastMessage,
+  } = useChatStore();
+
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const { register, handleSubmit, reset, formState: { errors } } = useForm<ChatFormValues>({
@@ -44,14 +46,14 @@ export function ChatInterface() {
   }, [messages]);
 
   const sendMessage = async (values: ChatFormValues) => {
-    const userMessage: Message = {
-      role: 'user',
+    const userMessage = {
+      role: 'user' as const,
       content: values.message,
       timestamp: new Date().toISOString(),
     };
-    setMessages((prev) => [...prev, userMessage]);
+    addMessage(userMessage);
     reset();
-    setIsLoading(true);
+    setLoading(true);
 
     try {
       const response = await apiClient.post<ChatResponse>('/ai/chat', {
@@ -63,50 +65,21 @@ export function ChatInterface() {
         setConversationId(response.conversationId);
       }
 
-      // The AI returns a JSON string inside response.message — parse it
-      let parsedResponse: ChatResponse = response;
-      let displayMessage = response.message;
-
-      try {
-        // Strip markdown code blocks if present
-        const cleaned = response.message
-          .replace(/^```json\s*/i, '')
-          .replace(/^```\s*/i, '')
-          .replace(/```$/i, '')
-          .trim();
-
-        if (cleaned.startsWith('{')) {
-          const parsed = JSON.parse(cleaned) as ChatResponse;
-          parsedResponse = {
-            ...response,
-            message: parsed.message ?? response.message,
-            intent: parsed.intent,
-            products: parsed.products,
-            followUpQuestions: parsed.followUpQuestions,
-          };
-          displayMessage = parsed.message ?? response.message;
-        }
-      } catch {
-        // Not JSON — display as plain text
-      }
-
-      const assistantMessage: Message = {
+      addMessage({
         role: 'assistant',
-        content: displayMessage,
-        response: parsedResponse,
+        content: response.message,
+        response,
         timestamp: new Date().toISOString(),
-      };
-      setMessages((prev) => [...prev, assistantMessage]);
+      });
     } catch (err: unknown) {
       toast({
         variant: 'destructive',
         title: 'Something went wrong',
         description: err instanceof Error ? err.message : 'Failed to get a response',
       });
-      // Remove the user message on failure so they can retry
-      setMessages((prev) => prev.slice(0, -1));
+      removeLastMessage();
     } finally {
-      setIsLoading(false);
+      setLoading(false);
     }
   };
 
@@ -118,10 +91,26 @@ export function ChatInterface() {
 
   return (
     <div className="flex flex-col h-full">
+      {/* Header */}
+      {!isEmpty && (
+        <div className="flex items-center justify-between px-4 py-2 border-b shrink-0">
+          <p className="text-sm text-muted-foreground">
+            {messages.filter((m) => m.role === 'user').length} messages
+          </p>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="gap-1.5 text-xs"
+            onClick={clearChat}
+          >
+            <Plus className="h-3.5 w-3.5" /> New chat
+          </Button>
+        </div>
+      )}
+
       {/* Message area */}
       <ScrollArea className="flex-1 px-4">
         {isEmpty ? (
-          /* Empty state */
           <div className="flex flex-col items-center justify-center h-full py-16 space-y-6">
             <div className="h-14 w-14 rounded-full bg-primary/10 flex items-center justify-center">
               <Sparkles className="h-7 w-7 text-primary" />
@@ -129,7 +118,7 @@ export function ChatInterface() {
             <div className="text-center space-y-1">
               <h2 className="text-lg font-semibold">SmartShop AI Assistant</h2>
               <p className="text-sm text-muted-foreground max-w-sm">
-                Describe what you&apos;re looking for and I&apos;ll find the best options, explain the trade-offs, and answer your questions.
+                Describe what you&apos;re looking for and I&apos;ll find the best options from our catalog.
               </p>
             </div>
             <div className="grid gap-2 w-full max-w-md">
@@ -149,14 +138,21 @@ export function ChatInterface() {
             {messages.map((msg, i) => (
               <div key={i} className="space-y-3">
                 <ChatMessage role={msg.role} content={msg.content} timestamp={msg.timestamp} />
-                {/* Render product cards if the response contains recommendations */}
+
+                {/* Product recommendation cards */}
                 {msg.response?.products && msg.response.products.length > 0 && (
-                  <div className="ml-9 grid gap-3">
-                    {msg.response.products.map((rec) => (
-                      <ProductRecommendationCard key={rec.productId} recommendation={rec} />
-                    ))}
+                  <div className="ml-9 space-y-2">
+                    <p className="text-xs text-muted-foreground font-medium">
+                      {msg.response.products.length} product{msg.response.products.length > 1 ? 's' : ''} found
+                    </p>
+                    <div className="grid gap-3">
+                      {msg.response.products.map((rec) => (
+                        <ProductRecommendationCard key={rec.productId} recommendation={rec} />
+                      ))}
+                    </div>
                   </div>
                 )}
+
                 {/* Follow-up questions */}
                 {msg.response?.followUpQuestions && msg.response.followUpQuestions.length > 0 && (
                   <div className="ml-9 flex flex-wrap gap-2">
@@ -197,7 +193,7 @@ export function ChatInterface() {
       </ScrollArea>
 
       {/* Input area */}
-      <div className="border-t bg-background px-4 py-3">
+      <div className="border-t bg-background px-4 py-3 shrink-0">
         <form
           onSubmit={handleSubmit(sendMessage)}
           className="flex gap-2 max-w-3xl mx-auto"

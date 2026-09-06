@@ -183,6 +183,8 @@ INSTRUCTIONS:
 6. If budget filter applies, only include products within budget
 7. Keep the message friendly and helpful
 
+CRITICAL: The "products" array in your JSON response MUST contain ALL ${productCount} entries — one for each product above.
+
 Respond with this EXACT JSON format:
 {
   "message": "Here are the best laptops under ₹80,000 for Flutter development:\n\n1. **[Product Name]** - ₹[price]\n[2-3 line explanation of why it matches]\n\n2. **[Product Name]** - ₹[price]\n[explanation]\n\n[continue for all matching products]",
@@ -199,7 +201,7 @@ Respond with this EXACT JSON format:
   "followUpQuestions": ["One helpful follow-up question"]
 }
 
-Include ALL ${productCount} products in the products array. Order by best match first.`;
+The products array MUST have exactly ${productCount} items. Do not skip any product.`;
     }
     buildChatSystemPrompt() {
         return `You are SmartShop AI, a friendly shopping assistant for an Indian e-commerce platform.
