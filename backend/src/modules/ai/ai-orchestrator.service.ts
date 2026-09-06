@@ -73,8 +73,8 @@ export class AiOrchestratorService {
         // ── Phase 2: Deterministic search ──────────────────────────
         const searchResults = await this.searchService.searchProducts({
           query: (requirements.query as string) ?? message,
-          categoryId: requirements.categoryId as string | undefined,
-          brandId: requirements.brandId as string | undefined,
+          // Don't use categoryId from AI — use keyword search instead
+          // because AI returns slugs not UUIDs
           minPrice: requirements.minPrice as number | undefined,
           maxPrice: requirements.maxPrice as number | undefined,
           limit: 8,
@@ -179,15 +179,21 @@ User message: "${message}"
 
 Return JSON with these fields (omit fields that are not mentioned):
 {
-  "query": "keyword search terms",
-  "categoryId": "one of: laptops, smartphones, tablets, monitors, headphones, cameras, televisions",
-  "brandId": "brand name if mentioned",
-  "minPrice": number or null,
-  "maxPrice": number or null,
-  "minRam": number in GB or null,
-  "minStorage": number in GB or null,
+  "query": "include category + key specs as search terms e.g. 'laptop 16GB RAM', 'smartphone camera'",
+  "minPrice": number in INR or null,
+  "maxPrice": number in INR or null,
   "useCase": "description of intended use"
 }
+
+Examples:
+- "I need a laptop under ₹80,000 for Flutter development with 16GB RAM"
+  → { "query": "laptop Flutter development 16GB RAM", "maxPrice": 80000 }
+
+- "Best phone under ₹40,000 with good camera"
+  → { "query": "smartphone phone camera", "maxPrice": 40000 }
+
+- "Wireless headphones under ₹5,000"
+  → { "query": "wireless headphones", "maxPrice": 5000 }
 
 Return ONLY the JSON object, no explanation.`;
   }
