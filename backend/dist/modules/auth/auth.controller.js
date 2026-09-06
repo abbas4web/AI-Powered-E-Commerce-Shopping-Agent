@@ -18,24 +18,55 @@ const swagger_1 = require("@nestjs/swagger");
 const auth_service_1 = require("./auth.service");
 const register_dto_1 = require("./dto/register.dto");
 const login_dto_1 = require("./dto/login.dto");
-const refresh_token_dto_1 = require("./dto/refresh-token.dto");
 const public_decorator_1 = require("../../common/decorators/public.decorator");
 const local_auth_guard_1 = require("./guards/local-auth.guard");
+const config_1 = require("@nestjs/config");
+const REFRESH_COOKIE = 'smartshop_refresh';
 let AuthController = class AuthController {
-    constructor(authService) {
+    constructor(authService, configService) {
         this.authService = authService;
+        this.configService = configService;
     }
-    register(dto) {
-        return this.authService.register(dto);
+    async register(dto, res) {
+        const tokens = await this.authService.register(dto);
+        this.setRefreshCookie(res, tokens.refreshToken);
+        return { accessToken: tokens.accessToken };
     }
-    login(dto) {
-        return this.authService.login(dto);
+    async login(dto, res) {
+        const tokens = await this.authService.login(dto);
+        this.setRefreshCookie(res, tokens.refreshToken);
+        return { accessToken: tokens.accessToken };
     }
-    refresh(dto) {
-        return this.authService.refreshToken(dto.refreshToken);
+    async refresh(req, res) {
+        const refreshToken = req.cookies?.[REFRESH_COOKIE];
+        if (!refreshToken) {
+            res.status(common_1.HttpStatus.UNAUTHORIZED).json({
+                success: false,
+                error: { code: 'UNAUTHORIZED', message: 'No refresh token' },
+            });
+            return;
+        }
+        const tokens = await this.authService.refreshToken(refreshToken);
+        this.setRefreshCookie(res, tokens.refreshToken);
+        return { accessToken: tokens.accessToken };
     }
-    logout(dto) {
-        return this.authService.logout(dto.refreshToken);
+    async logout(res) {
+        this.clearRefreshCookie(res);
+        return this.authService.logout();
+    }
+    setRefreshCookie(res, token) {
+        const isProd = this.configService.get('app.nodeEnv') === 'production';
+        const sevenDays = 7 * 24 * 60 * 60 * 1000;
+        res.cookie(REFRESH_COOKIE, token, {
+            httpOnly: true,
+            secure: isProd,
+            sameSite: isProd ? 'none' : 'lax',
+            maxAge: sevenDays,
+            path: '/api/auth',
+        });
+    }
+    clearRefreshCookie(res) {
+        res.clearCookie(REFRESH_COOKIE, { path: '/api/auth' });
     }
 };
 exports.AuthController = AuthController;
@@ -44,9 +75,10 @@ __decorate([
     (0, common_1.Post)('register'),
     (0, swagger_1.ApiOperation)({ summary: 'Register a new user' }),
     __param(0, (0, common_1.Body)()),
+    __param(1, (0, common_1.Res)({ passthrough: true })),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [register_dto_1.RegisterDto]),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [register_dto_1.RegisterDto, Object]),
+    __metadata("design:returntype", Promise)
 ], AuthController.prototype, "register", null);
 __decorate([
     (0, public_decorator_1.Public)(),
@@ -55,32 +87,35 @@ __decorate([
     (0, common_1.HttpCode)(common_1.HttpStatus.OK),
     (0, swagger_1.ApiOperation)({ summary: 'Login with email and password' }),
     __param(0, (0, common_1.Body)()),
+    __param(1, (0, common_1.Res)({ passthrough: true })),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [login_dto_1.LoginDto]),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [login_dto_1.LoginDto, Object]),
+    __metadata("design:returntype", Promise)
 ], AuthController.prototype, "login", null);
 __decorate([
     (0, public_decorator_1.Public)(),
     (0, common_1.Post)('refresh'),
     (0, common_1.HttpCode)(common_1.HttpStatus.OK),
-    (0, swagger_1.ApiOperation)({ summary: 'Refresh access token' }),
-    __param(0, (0, common_1.Body)()),
+    (0, swagger_1.ApiOperation)({ summary: 'Refresh access token using HttpOnly cookie' }),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Res)({ passthrough: true })),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [refresh_token_dto_1.RefreshTokenDto]),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", Promise)
 ], AuthController.prototype, "refresh", null);
 __decorate([
     (0, common_1.Post)('logout'),
     (0, common_1.HttpCode)(common_1.HttpStatus.OK),
-    (0, swagger_1.ApiOperation)({ summary: 'Logout and invalidate refresh token' }),
-    __param(0, (0, common_1.Body)()),
+    (0, swagger_1.ApiOperation)({ summary: 'Logout and clear refresh token cookie' }),
+    __param(0, (0, common_1.Res)({ passthrough: true })),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [refresh_token_dto_1.RefreshTokenDto]),
-    __metadata("design:returntype", void 0)
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", Promise)
 ], AuthController.prototype, "logout", null);
 exports.AuthController = AuthController = __decorate([
     (0, swagger_1.ApiTags)('Auth'),
     (0, common_1.Controller)('auth'),
-    __metadata("design:paramtypes", [auth_service_1.AuthService])
+    __metadata("design:paramtypes", [auth_service_1.AuthService,
+        config_1.ConfigService])
 ], AuthController);
 //# sourceMappingURL=auth.controller.js.map

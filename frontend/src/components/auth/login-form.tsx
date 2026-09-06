@@ -12,11 +12,14 @@ import { loginSchema, type LoginFormValues } from '@/lib/validations';
 import { apiClient } from '@/lib/api-client';
 import { useAuthStore } from '@/store/auth.store';
 import { toast } from '@/hooks/use-toast';
-import type { AuthTokens } from '@smartshop/shared';
+
+interface LoginResponse {
+  accessToken: string;
+}
 
 export function LoginForm() {
   const router = useRouter();
-  const { setTokens } = useAuthStore();
+  const { setAccessToken } = useAuthStore();
   const [isLoading, setIsLoading] = useState(false);
 
   const {
@@ -28,8 +31,9 @@ export function LoginForm() {
   const onSubmit = async (values: LoginFormValues) => {
     setIsLoading(true);
     try {
-      const tokens = await apiClient.post<AuthTokens>('/auth/login', values);
-      setTokens(tokens.accessToken, tokens.refreshToken);
+      const res = await apiClient.post<LoginResponse>('/auth/login', values);
+      // Store access token in memory only — refresh token is in HttpOnly cookie
+      setAccessToken(res.accessToken);
       router.push('/assistant');
     } catch (err: unknown) {
       toast({

@@ -6,6 +6,7 @@ const config_1 = require("@nestjs/config");
 const swagger_1 = require("@nestjs/swagger");
 const helmet_1 = require("helmet");
 const compression = require("compression");
+const cookieParser = require("cookie-parser");
 const app_module_1 = require("./app.module");
 const logger_service_1 = require("./common/logger/logger.service");
 async function bootstrap() {
@@ -14,6 +15,7 @@ async function bootstrap() {
     const logger = new logger_service_1.AppLogger('Bootstrap');
     app.use((0, helmet_1.default)());
     app.use(compression());
+    app.use(cookieParser());
     const frontendUrl = configService.get('app.frontendUrl') ?? 'http://localhost:3000';
     const isDev = configService.get('app.nodeEnv') !== 'production';
     app.enableCors({

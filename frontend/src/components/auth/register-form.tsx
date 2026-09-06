@@ -12,11 +12,14 @@ import { registerSchema, type RegisterFormValues } from '@/lib/validations';
 import { apiClient } from '@/lib/api-client';
 import { useAuthStore } from '@/store/auth.store';
 import { toast } from '@/hooks/use-toast';
-import type { AuthTokens } from '@smartshop/shared';
+
+interface RegisterResponse {
+  accessToken: string;
+}
 
 export function RegisterForm() {
   const router = useRouter();
-  const { setTokens } = useAuthStore();
+  const { setAccessToken } = useAuthStore();
   const [isLoading, setIsLoading] = useState(false);
 
   const {
@@ -29,8 +32,8 @@ export function RegisterForm() {
     setIsLoading(true);
     try {
       const { confirmPassword: _cp, ...payload } = values;
-      const tokens = await apiClient.post<AuthTokens>('/auth/register', payload);
-      setTokens(tokens.accessToken, tokens.refreshToken);
+      const res = await apiClient.post<RegisterResponse>('/auth/register', payload);
+      setAccessToken(res.accessToken);
       router.push('/assistant');
     } catch (err: unknown) {
       toast({

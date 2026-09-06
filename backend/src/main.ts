@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 import * as compression from 'compression';
+import * as cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
 import { AppLogger } from './common/logger/logger.service';
 
@@ -16,6 +17,7 @@ async function bootstrap() {
   // ─── Security ────────────────────────────────────────────────────────────
   app.use(helmet());
   app.use(compression());
+  app.use(cookieParser());
 
   // ─── CORS ────────────────────────────────────────────────────────────────
   const frontendUrl = configService.get<string>('app.frontendUrl') ?? 'http://localhost:3000';

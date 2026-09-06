@@ -43,27 +43,23 @@ let AuthService = class AuthService {
     }
     async validateUser(email, password) {
         const user = await this.usersService.findByEmail(email);
-        if (!user) {
+        if (!user)
             throw new common_1.UnauthorizedException('Invalid credentials');
-        }
         const isMatch = await bcrypt.compare(password, user.password);
-        if (!isMatch) {
+        if (!isMatch)
             throw new common_1.UnauthorizedException('Invalid credentials');
-        }
         return user;
     }
     async refreshToken(token) {
         try {
-            const payload = this.jwtService.verify(token, {
-                secret: this.configService.get('jwt.refreshSecret'),
-            });
+            const payload = this.jwtService.verify(token, { secret: this.configService.get('jwt.refreshSecret') });
             return this.generateTokens(payload.sub, payload.email, payload.role);
         }
         catch {
             throw new common_1.UnauthorizedException('Invalid or expired refresh token');
         }
     }
-    async logout(_refreshToken) {
+    async logout() {
         return { message: 'Logged out successfully' };
     }
     generateTokens(userId, email, role) {

@@ -1,47 +1,50 @@
+'use client';
+
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+
+/**
+ * Auth store — access token in memory ONLY.
+ *
+ * Security model:
+ * - accessToken: kept in memory (lost on page refresh — re-fetched via /auth/refresh)
+ * - refreshToken: HttpOnly cookie set by the server (JS cannot read it)
+ * - Nothing is persisted to localStorage or sessionStorage
+ */
+
+interface AuthUser {
+  id: string;
+  email: string;
+  firstName: string;
+  lastName: string;
+  role: string;
+  avatarUrl: string | null;
+}
 
 interface AuthState {
   accessToken: string | null;
-  refreshToken: string | null;
-  user: {
-    id: string;
-    email: string;
-    firstName: string;
-    lastName: string;
-    role: string;
-    avatarUrl: string | null;
-  } | null;
+  user: AuthUser | null;
   isAuthenticated: boolean;
-  setTokens: (accessToken: string, refreshToken: string) => void;
-  setUser: (user: AuthState['user']) => void;
+  isHydrated: boolean;
+
+  setAccessToken: (token: string) => void;
+  setUser: (user: AuthUser) => void;
   logout: () => void;
+  setHydrated: () => void;
 }
 
-export const useAuthStore = create<AuthState>()(
-  persist(
-    (set) => ({
-      accessToken: null,
-      refreshToken: null,
-      user: null,
-      isAuthenticated: false,
+export const useAuthStore = create<AuthState>()((set) => ({
+  accessToken: null,
+  user: null,
+  isAuthenticated: false,
+  isHydrated: false,
 
-      setTokens: (accessToken, refreshToken) =>
-        set({ accessToken, refreshToken, isAuthenticated: true }),
+  setAccessToken: (token) =>
+    set({ accessToken: token, isAuthenticated: true }),
 
-      setUser: (user) => set({ user }),
+  setUser: (user) => set({ user }),
 
-      logout: () =>
-        set({ accessToken: null, refreshToken: null, user: null, isAuthenticated: false }),
-    }),
-    {
-      name: 'smartshop_auth',
-      // Only persist tokens — user profile is re-fetched on mount
-      partialize: (state) => ({
-        accessToken: state.accessToken,
-        refreshToken: state.refreshToken,
-        isAuthenticated: state.isAuthenticated,
-      }),
-    },
-  ),
-);
+  logout: () =>
+    set({ accessToken: null, user: null, isAuthenticated: false }),
+
+  setHydrated: () => set({ isHydrated: true }),
+}));

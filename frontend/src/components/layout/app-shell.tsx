@@ -22,6 +22,7 @@ import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Separator } from '@/components/ui/separator';
 import { useAuthStore } from '@/store/auth.store';
+import { apiClient } from '@/lib/api-client';
 
 const navItems = [
   { href: '/assistant', label: 'AI Assistant', icon: Sparkles },
@@ -41,6 +42,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { theme, setTheme } = useTheme();
   const { user, logout } = useAuthStore();
+
+  const handleLogout = async () => {
+    try {
+      await apiClient.post('/auth/logout', {});
+    } catch {
+      // Ignore errors — clear state regardless
+    }
+    logout();
+  };
 
   const initials = user
     ? `${user.firstName[0]}${user.lastName[0]}`.toUpperCase()
@@ -142,7 +152,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               size="icon"
               className="h-8 w-8 ml-auto"
               aria-label="Sign out"
-              onClick={logout}
+              onClick={handleLogout}
             >
               <LogOut className="h-4 w-4" />
             </Button>
