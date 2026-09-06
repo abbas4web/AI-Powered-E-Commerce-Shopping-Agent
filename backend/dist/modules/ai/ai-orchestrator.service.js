@@ -25,7 +25,7 @@ let AiOrchestratorService = class AiOrchestratorService {
         this.toolDispatcher = toolDispatcher;
         this.conversationsService = conversationsService;
         this.logger = new logger_service_1.AppLogger('AiOrchestrator');
-        this.MAX_TOOL_ROUNDS = 5;
+        this.MAX_TOOL_ROUNDS = 3;
     }
     async processMessage(userId, dto) {
         const { message, conversationId } = dto;
@@ -38,105 +38,127 @@ let AiOrchestratorService = class AiOrchestratorService {
         }));
         history.push({ role: 'user', content: message });
         const systemPrompt = this.buildSystemPrompt();
-        let messages = [...history];
-        let toolRound = 0;
-        let finalResponse = null;
-        while (toolRound < this.MAX_TOOL_ROUNDS) {
-            this.logger.debug(`AI round ${toolRound + 1} — provider=${this.aiProvider.getProviderName()}`);
-            const response = await this.aiProvider.generate({
-                messages,
-                tools: tool_definitions_1.AI_TOOLS,
-                systemPrompt,
-                temperature: 0.3,
-            }).catch((err) => {
-                if (err.message?.includes('429') || err.message?.includes('Too Many Requests')) {
-                    throw new common_1.HttpException('The AI service is rate limited. Please wait a moment and try again.', common_1.HttpStatus.TOO_MANY_REQUESTS);
-                }
-                if (err.message?.includes('tool call validation failed') || err.message?.includes('400')) {
-                    this.logger.warn('Tool validation failed, retrying without tools');
-                    return this.aiProvider.generate({
-                        messages,
-                        systemPrompt,
-                        temperature: 0.3,
-                    });
-                }
-                throw err;
-            });
-            if (response.finishReason === 'stop' || response.toolCalls.length === 0) {
-                finalResponse = response.content;
-                break;
-            }
-            const toolResultMessages = [];
-            for (const toolCall of response.toolCalls) {
-                this.logger.debug(`Tool call: ${toolCall.name}(${JSON.stringify(toolCall.arguments)})`);
-                const result = await this.toolDispatcher.dispatch(userId, toolCall);
-                toolResultMessages.push({
-                    role: 'user',
-                    content: `Tool result for ${toolCall.name}: ${JSON.stringify(result)}`,
-                });
-            }
-            messages = [...messages, ...toolResultMessages];
-            toolRound++;
-        }
-        if (finalResponse === null) {
-            this.logger.warn('Max tool rounds reached without final response');
-            finalResponse = 'I was unable to complete the request. Please try again.';
-        }
-        await this.conversationsService.addMessage(conversation.id, 'user', message);
-        let displayMessage = finalResponse;
+        const messages = [...history];
+        let finalResponse = '';
         let structuredData = {};
         try {
-            const cleaned = (finalResponse ?? '')
-                .replace(/^```json\s*/i, '')
-                .replace(/^```\s*/i, '')
-                .replace(/```$/i, '')
+            const firstResponse = await this.callAI(messages, systemPrompt, true);
+            if (firstResponse.toolCalls.length > 0) {
+                const toolResults = [];
+                for (const toolCall of firstResponse.toolCalls) {
+                    this.logger.debug(`Tool: ${toolCall.name}(${JSON.stringify(toolCall.arguments)})`);
+                    try {
+                        const result = await this.toolDispatcher.dispatch(userId, toolCall);
+                        toolResults.push(`${toolCall.name} results: ${JSON.stringify(result)}`);
+                    }
+                    catch (err) {
+                        this.logger.warn(`Tool ${toolCall.name} failed: ${err.message}`);
+                        toolResults.push(`${toolCall.name} failed: no results found`);
+                    }
+                }
+                const contextMessage = `Here are the search results from the database:\n\n${toolResults.join('\n\n')}\n\nNow provide your recommendation based on these real results.`;
+                messages.push({ role: 'user', content: contextMessage });
+                const secondResponse = await this.callAI(messages, systemPrompt, false);
+                finalResponse = secondResponse.content ?? '';
+            }
+            else {
+                finalResponse = firstResponse.content ?? '';
+            }
+        }
+        catch (err) {
+            if (err instanceof common_1.HttpException)
+                throw err;
+            this.logger.error(`AI processing failed: ${err.message}`);
+            finalResponse = 'I encountered an issue processing your request. Please try again.';
+        }
+        try {
+            const cleaned = finalResponse
+                .replace(/^```json\s*/im, '')
+                .replace(/^```\s*/im, '')
+                .replace(/```\s*$/im, '')
                 .trim();
             if (cleaned.startsWith('{')) {
                 const parsed = JSON.parse(cleaned);
-                displayMessage = parsed.message ?? finalResponse;
+                finalResponse = parsed.message ?? finalResponse;
                 structuredData = parsed;
             }
         }
         catch {
         }
-        await this.conversationsService.addMessage(conversation.id, 'assistant', displayMessage ?? '');
+        await this.conversationsService.addMessage(conversation.id, 'user', message);
+        await this.conversationsService.addMessage(conversation.id, 'assistant', finalResponse);
         return {
             conversationId: conversation.id,
-            message: displayMessage ?? '',
-            intent: structuredData.intent,
-            products: structuredData.products,
-            followUpQuestions: structuredData.followUpQuestions,
+            message: finalResponse,
+            intent: structuredData.intent ?? 'GENERAL',
+            products: structuredData.products ?? [],
+            followUpQuestions: structuredData.followUpQuestions ?? [],
         };
     }
+    async callAI(messages, systemPrompt, withTools) {
+        return this.aiProvider
+            .generate({
+            messages,
+            tools: withTools ? tool_definitions_1.AI_TOOLS : undefined,
+            systemPrompt,
+            temperature: 0.4,
+            maxTokens: 4096,
+        })
+            .catch((err) => {
+            if (err.message?.includes('429') || err.message?.includes('Too Many Requests')) {
+                throw new common_1.HttpException('The AI is temporarily rate limited. Please wait a moment and try again.', common_1.HttpStatus.TOO_MANY_REQUESTS);
+            }
+            if (err.message?.includes('tool call validation') ||
+                err.message?.includes('400') ||
+                err.message?.includes('tool_use_failed')) {
+                this.logger.warn('Tool validation error — retrying without tools');
+                return this.aiProvider.generate({
+                    messages,
+                    systemPrompt,
+                    temperature: 0.4,
+                    maxTokens: 4096,
+                });
+            }
+            throw err;
+        });
+    }
     buildSystemPrompt() {
-        return `You are SmartShop AI, an expert shopping assistant for an Indian e-commerce platform.
+        return `You are SmartShop AI, a helpful shopping assistant for an Indian e-commerce platform.
 
-Your job is to understand the user's shopping needs, extract structured requirements, and recommend the best products.
+Your job:
+1. Understand what the user wants to buy
+2. Use the searchProducts tool to find matching products from the database
+3. Recommend the best options with clear explanations
 
-RULES:
-1. Always extract structured requirements before searching (budget, category, specs, use case).
-2. Use the available tools to search and retrieve product data. Never invent product information.
-3. Apply hard constraints strictly (budget limits, minimum specs must be honored).
-4. Explain your recommendations clearly — mention why each product matches the requirements.
-5. Ask follow-up questions if the requirements are ambiguous.
-6. Prices are in Indian Rupees (₹) unless stated otherwise.
-7. Never fabricate product names, prices, or specifications.
-8. If no products match, explain why and suggest relaxing a constraint.
+IMPORTANT RULES:
+- Always use searchProducts to find real products before recommending
+- Never invent product names, prices, or specifications  
+- Prices are in Indian Rupees (₹)
+- If the user says hello or asks a general question, respond conversationally without searching
+- Keep responses clear and helpful
 
-When recommending products, structure your response as JSON matching this schema:
+When you have search results, respond in this JSON format:
 {
-  "message": "string",
-  "intent": "PRODUCT_RECOMMENDATION | PRODUCT_SEARCH | COMPARISON | CLARIFICATION | GENERAL",
+  "message": "Your helpful recommendation message here",
+  "intent": "PRODUCT_RECOMMENDATION",
   "products": [
     {
-      "productId": "string",
-      "score": number,
-      "reason": "string",
-      "matchedRequirements": ["string"],
-      "warnings": ["string"]
+      "productId": "the actual product id from search results",
+      "score": 85,
+      "reason": "Why this product is a good match",
+      "matchedRequirements": ["budget", "RAM", "use case"],
+      "warnings": []
     }
   ],
-  "followUpQuestions": ["string"]
+  "followUpQuestions": ["Any clarifying questions if needed"]
+}
+
+For greetings or general questions, respond with:
+{
+  "message": "Your conversational response",
+  "intent": "GENERAL",
+  "products": [],
+  "followUpQuestions": []
 }`;
     }
 };
