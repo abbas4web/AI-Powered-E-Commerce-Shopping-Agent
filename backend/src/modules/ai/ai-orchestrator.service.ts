@@ -107,8 +107,13 @@ export class AiOrchestratorService {
       }
     } catch (err) {
       if (err instanceof HttpException) throw err;
-      this.logger.error(`AI processing failed: ${(err as Error).message}`, (err as Error).stack);
-      finalResponse = 'I encountered an issue processing your request. Please try again.';
+      const errorMsg = (err as Error).message ?? 'Unknown error';
+      const errorStack = (err as Error).stack ?? '';
+      this.logger.error(`AI processing failed: ${errorMsg}`, errorStack);
+      // Return the actual error message in development for easier debugging
+      finalResponse = process.env.NODE_ENV === 'development'
+        ? `Error: ${errorMsg}`
+        : 'I encountered an issue processing your request. Please try again.';
     }
 
     // Parse structured JSON if present

@@ -83,8 +83,12 @@ let AiOrchestratorService = class AiOrchestratorService {
         catch (err) {
             if (err instanceof common_1.HttpException)
                 throw err;
-            this.logger.error(`AI processing failed: ${err.message}`, err.stack);
-            finalResponse = 'I encountered an issue processing your request. Please try again.';
+            const errorMsg = err.message ?? 'Unknown error';
+            const errorStack = err.stack ?? '';
+            this.logger.error(`AI processing failed: ${errorMsg}`, errorStack);
+            finalResponse = process.env.NODE_ENV === 'development'
+                ? `Error: ${errorMsg}`
+                : 'I encountered an issue processing your request. Please try again.';
         }
         try {
             const cleaned = finalResponse
