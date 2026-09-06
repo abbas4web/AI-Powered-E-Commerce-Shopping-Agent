@@ -29,7 +29,9 @@ function getAccessToken(): string | null {
   try {
     const raw = localStorage.getItem('smartshop_auth');
     if (!raw) return null;
-    return (JSON.parse(raw) as { accessToken?: string }).accessToken ?? null;
+    // Zustand persist wraps the state in { state: { ... }, version: 0 }
+    const parsed = JSON.parse(raw) as { state?: { accessToken?: string }; accessToken?: string };
+    return parsed?.state?.accessToken ?? parsed?.accessToken ?? null;
   } catch {
     return null;
   }
