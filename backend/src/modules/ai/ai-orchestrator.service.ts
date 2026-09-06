@@ -101,11 +101,35 @@ export class AiOrchestratorService {
 
     // Persist the exchange
     await this.conversationsService.addMessage(conversation.id, 'user', message);
-    await this.conversationsService.addMessage(conversation.id, 'assistant', finalResponse);
+
+    // Try to parse structured JSON from the AI response
+    let displayMessage = finalResponse;
+    let structuredData: Record<string, unknown> = {};
+
+    try {
+      const cleaned = (finalResponse ?? '')
+        .replace(/^```json\s*/i, '')
+        .replace(/^```\s*/i, '')
+        .replace(/```$/i, '')
+        .trim();
+
+      if (cleaned.startsWith('{')) {
+        const parsed = JSON.parse(cleaned) as Record<string, unknown>;
+        displayMessage = (parsed.message as string) ?? finalResponse;
+        structuredData = parsed;
+      }
+    } catch {
+      // Not JSON — use as plain text
+    }
+
+    await this.conversationsService.addMessage(conversation.id, 'assistant', displayMessage ?? '');
 
     return {
       conversationId: conversation.id,
-      message: finalResponse,
+      message: displayMessage ?? '',
+      intent: structuredData.intent,
+      products: structuredData.products,
+      followUpQuestions: structuredData.followUpQuestions,
     };
   }
 

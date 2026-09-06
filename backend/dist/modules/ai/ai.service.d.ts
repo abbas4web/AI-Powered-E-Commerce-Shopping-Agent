@@ -9,5 +9,8 @@ export declare class AiService {
     chat(userId: string, dto: ChatRequestDto): Promise<{
         conversationId: string;
         message: string;
+        intent: unknown;
+        products: unknown;
+        followUpQuestions: unknown;
     }>;
 }

@@ -7,5 +7,8 @@ export declare class AiController {
     chat(user: JwtPayload, dto: ChatRequestDto): Promise<{
         conversationId: string;
         message: string;
+        intent: unknown;
+        products: unknown;
+        followUpQuestions: unknown;
     }>;
 }

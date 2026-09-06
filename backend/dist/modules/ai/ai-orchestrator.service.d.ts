@@ -12,6 +12,9 @@ export declare class AiOrchestratorService {
     processMessage(userId: string, dto: ChatRequestDto): Promise<{
         conversationId: string;
         message: string;
+        intent: unknown;
+        products: unknown;
+        followUpQuestions: unknown;
     }>;
     private buildSystemPrompt;
 }

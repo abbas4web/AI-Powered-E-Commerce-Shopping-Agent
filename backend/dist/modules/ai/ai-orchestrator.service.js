@@ -75,10 +75,29 @@ let AiOrchestratorService = class AiOrchestratorService {
             finalResponse = 'I was unable to complete the request. Please try again.';
         }
         await this.conversationsService.addMessage(conversation.id, 'user', message);
-        await this.conversationsService.addMessage(conversation.id, 'assistant', finalResponse);
+        let displayMessage = finalResponse;
+        let structuredData = {};
+        try {
+            const cleaned = (finalResponse ?? '')
+                .replace(/^```json\s*/i, '')
+                .replace(/^```\s*/i, '')
+                .replace(/```$/i, '')
+                .trim();
+            if (cleaned.startsWith('{')) {
+                const parsed = JSON.parse(cleaned);
+                displayMessage = parsed.message ?? finalResponse;
+                structuredData = parsed;
+            }
+        }
+        catch {
+        }
+        await this.conversationsService.addMessage(conversation.id, 'assistant', displayMessage ?? '');
         return {
             conversationId: conversation.id,
-            message: finalResponse,
+            message: displayMessage ?? '',
+            intent: structuredData.intent,
+            products: structuredData.products,
+            followUpQuestions: structuredData.followUpQuestions,
         };
     }
     buildSystemPrompt() {
