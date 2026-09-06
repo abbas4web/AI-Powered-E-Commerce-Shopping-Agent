@@ -7,6 +7,9 @@ export declare class AiService {
     private readonly logger;
     constructor(aiProvider: IAIProvider, orchestrator: AiOrchestratorService);
     chat(userId: string, dto: ChatRequestDto): Promise<{
+        debug?: {
+            pipeline: string[];
+        } | undefined;
         conversationId: string;
         message: string;
         intent: import("./agents/agent.types").AgentIntent;

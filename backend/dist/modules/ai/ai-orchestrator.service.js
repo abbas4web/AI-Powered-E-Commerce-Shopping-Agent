@@ -45,34 +45,43 @@ let AiOrchestratorService = class AiOrchestratorService {
             originalMessage: message,
             history,
         };
+        const pipelineTrace = [];
         try {
             this.logger.debug(`[Pipeline] Step 1 — RouterAgent`);
             context = await this.routerAgent.run(context);
+            pipelineTrace.push(`RouterAgent → intent: ${context.intent}`);
             this.logger.debug(`[Pipeline] Intent: ${context.intent}`);
             switch (context.intent) {
                 case 'PRODUCT_SEARCH':
                 case 'PRODUCT_DETAILS':
                     this.logger.debug(`[Pipeline] Step 2 — SearchAgent`);
                     context = await this.searchAgent.run(context);
+                    pipelineTrace.push(`SearchAgent → found: ${context.totalFound} products, query: "${context.requirements?.query}"`);
                     this.logger.debug(`[Pipeline] Step 3 — RankingAgent`);
                     context = await this.rankingAgent.run(context);
+                    pipelineTrace.push(`RankingAgent → ranked: ${context.rankedProducts?.length}, top score: ${context.rankedProducts?.[0]?.score}`);
                     break;
                 case 'PRODUCT_COMPARE':
                     this.logger.debug(`[Pipeline] Step 2 — CompareAgent`);
                     context = await this.compareAgent.run(context);
+                    pipelineTrace.push(`CompareAgent → compared: ${context.comparisonResult?.products.length ?? 0} products`);
                     if (context.intent === 'PRODUCT_SEARCH') {
                         this.logger.debug(`[Pipeline] Compare fallback → SearchAgent`);
+                        pipelineTrace.push(`CompareAgent → fallback to SearchAgent`);
                         context = await this.searchAgent.run(context);
                         context = await this.rankingAgent.run(context);
+                        pipelineTrace.push(`RankingAgent → ranked: ${context.rankedProducts?.length}`);
                     }
                     break;
                 case 'GENERAL':
                 case 'WISHLIST':
                 case 'RECOMMENDATIONS':
+                    pipelineTrace.push(`${context.intent} → no search needed`);
                     break;
             }
             this.logger.debug(`[Pipeline] Step 4 — ResponseAgent`);
             context = await this.responseAgent.run(context);
+            pipelineTrace.push(`ResponseAgent → message generated`);
             if (context.rankedProducts?.length) {
                 await this.persistRecommendations(userId, conversation.id, context.rankedProducts).catch((err) => this.logger.warn(`Failed to persist recommendations: ${err.message}`));
             }
@@ -88,6 +97,7 @@ let AiOrchestratorService = class AiOrchestratorService {
         }
         await this.conversationsService.addMessage(conversation.id, 'user', message);
         await this.conversationsService.addMessage(conversation.id, 'assistant', context.finalMessage ?? '');
+        const isDev = process.env.NODE_ENV !== 'production';
         return {
             conversationId: conversation.id,
             message: context.finalMessage ?? '',
@@ -102,6 +112,7 @@ let AiOrchestratorService = class AiOrchestratorService {
                 warnings: p.warnings,
             })),
             followUpQuestions: context.followUpQuestions ?? [],
+            ...(isDev && { debug: { pipeline: pipelineTrace } }),
         };
     }
     async persistRecommendations(userId, conversationId, rankedProducts) {

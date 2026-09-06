@@ -5,6 +5,9 @@ export declare class AiController {
     private readonly aiService;
     constructor(aiService: AiService);
     chat(user: JwtPayload, dto: ChatRequestDto): Promise<{
+        debug?: {
+            pipeline: string[];
+        } | undefined;
         conversationId: string;
         message: string;
         intent: import("./agents/agent.types").AgentIntent;

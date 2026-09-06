@@ -61,10 +61,13 @@ export class AiOrchestratorService {
       history,
     };
 
+    const pipelineTrace: string[] = [];
+
     try {
       // ── Step 1: Route ──────────────────────────────────────────────────────
       this.logger.debug(`[Pipeline] Step 1 — RouterAgent`);
       context = await this.routerAgent.run(context);
+      pipelineTrace.push(`RouterAgent → intent: ${context.intent}`);
       this.logger.debug(`[Pipeline] Intent: ${context.intent}`);
 
       // ── Step 2: Agent-specific pipeline ───────────────────────────────────
@@ -73,33 +76,38 @@ export class AiOrchestratorService {
         case 'PRODUCT_DETAILS':
           this.logger.debug(`[Pipeline] Step 2 — SearchAgent`);
           context = await this.searchAgent.run(context);
+          pipelineTrace.push(`SearchAgent → found: ${context.totalFound} products, query: "${context.requirements?.query}"`);
 
           this.logger.debug(`[Pipeline] Step 3 — RankingAgent`);
           context = await this.rankingAgent.run(context);
+          pipelineTrace.push(`RankingAgent → ranked: ${context.rankedProducts?.length}, top score: ${context.rankedProducts?.[0]?.score}`);
           break;
 
         case 'PRODUCT_COMPARE':
           this.logger.debug(`[Pipeline] Step 2 — CompareAgent`);
           context = await this.compareAgent.run(context);
+          pipelineTrace.push(`CompareAgent → compared: ${context.comparisonResult?.products.length ?? 0} products`);
 
-          // CompareAgent may fall back to PRODUCT_SEARCH if names not found
           if (context.intent === 'PRODUCT_SEARCH') {
             this.logger.debug(`[Pipeline] Compare fallback → SearchAgent`);
+            pipelineTrace.push(`CompareAgent → fallback to SearchAgent`);
             context = await this.searchAgent.run(context);
             context = await this.rankingAgent.run(context);
+            pipelineTrace.push(`RankingAgent → ranked: ${context.rankedProducts?.length}`);
           }
           break;
 
         case 'GENERAL':
         case 'WISHLIST':
         case 'RECOMMENDATIONS':
-          // No search needed — ResponseAgent handles these directly
+          pipelineTrace.push(`${context.intent} → no search needed`);
           break;
       }
 
       // ── Step 3: Generate response ──────────────────────────────────────────
       this.logger.debug(`[Pipeline] Step 4 — ResponseAgent`);
       context = await this.responseAgent.run(context);
+      pipelineTrace.push(`ResponseAgent → message generated`);
 
       // ── Step 4: Persist top recommendations to DB ──────────────────────────
       if (context.rankedProducts?.length) {
@@ -130,6 +138,8 @@ export class AiOrchestratorService {
     );
 
     // ── Build API response ───────────────────────────────────────────────────
+    const isDev = process.env.NODE_ENV !== 'production';
+
     return {
       conversationId: conversation.id,
       message: context.finalMessage ?? '',
@@ -144,6 +154,8 @@ export class AiOrchestratorService {
         warnings: p.warnings,
       })),
       followUpQuestions: context.followUpQuestions ?? [],
+      // Pipeline trace — visible in dev mode so you can see which agents ran
+      ...(isDev && { debug: { pipeline: pipelineTrace } }),
     };
   }
 

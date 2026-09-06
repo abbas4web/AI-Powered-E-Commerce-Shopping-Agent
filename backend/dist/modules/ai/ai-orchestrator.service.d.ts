@@ -17,6 +17,9 @@ export declare class AiOrchestratorService {
     private readonly logger;
     constructor(conversationsService: ConversationsService, recommendationsService: RecommendationsService, routerAgent: RouterAgent, searchAgent: SearchAgent, compareAgent: CompareAgent, rankingAgent: RankingAgent, responseAgent: ResponseAgent);
     processMessage(userId: string, dto: ChatRequestDto): Promise<{
+        debug?: {
+            pipeline: string[];
+        } | undefined;
         conversationId: string;
         message: string;
         intent: import("./agents/agent.types").AgentIntent;
