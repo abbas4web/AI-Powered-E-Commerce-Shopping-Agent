@@ -212,36 +212,43 @@ Return ONLY the JSON object, no explanation.`;
       ? JSON.stringify(searchResults.items, null, 2)
       : 'No products found matching the criteria.';
 
+    const productCount = searchResults.items.length;
+
     return `You are SmartShop AI, a helpful shopping assistant for an Indian e-commerce platform.
 ${historyText}
 User asked: "${userMessage}"
 
 Extracted requirements: ${JSON.stringify(requirements)}
 
-Real products from our database:
+We found ${productCount} real products from our database:
 ${productsText}
 
-Based ONLY on the products above, provide helpful recommendations. 
-- Never invent products or specifications not shown above
-- Mention actual product names, prices, and specs from the data
-- If no products match, explain why and suggest adjusting the budget or requirements
-- Keep response conversational and helpful
+INSTRUCTIONS:
+1. Recommend ALL ${productCount} products that fit the user's requirements — not just one
+2. Rank them from best match to worst match
+3. For each product include its actual id, name, price from the data above
+4. Be specific — mention actual specs like RAM, processor, battery from the data
+5. Never invent or modify product data
+6. If budget filter applies, only include products within budget
+7. Keep the message friendly and helpful
 
-Respond in this JSON format:
+Respond with this EXACT JSON format:
 {
-  "message": "Your helpful recommendation (2-3 paragraphs)",
+  "message": "Here are the best laptops under ₹80,000 for Flutter development:\n\n1. **[Product Name]** - ₹[price]\n[2-3 line explanation of why it matches]\n\n2. **[Product Name]** - ₹[price]\n[explanation]\n\n[continue for all matching products]",
   "intent": "PRODUCT_RECOMMENDATION",
   "products": [
     {
-      "productId": "actual id from the products list",
-      "score": 85,
-      "reason": "Why this matches their needs",
-      "matchedRequirements": ["budget", "use case"],
+      "productId": "exact id from database",
+      "score": 90,
+      "reason": "Best match because...",
+      "matchedRequirements": ["budget", "RAM", "use case"],
       "warnings": []
     }
   ],
-  "followUpQuestions": ["Any clarifying questions if needed"]
-}`;
+  "followUpQuestions": ["One helpful follow-up question"]
+}
+
+Include ALL ${productCount} products in the products array. Order by best match first.`;
   }
 
   private buildChatSystemPrompt(): string {
