@@ -18,6 +18,7 @@ async function bootstrap() {
     app.use(cookieParser());
     const frontendUrl = configService.get('app.frontendUrl') ?? 'http://localhost:3000';
     const isDev = configService.get('app.nodeEnv') !== 'production';
+    const allowedOrigins = frontendUrl.split(',').map((o) => o.trim());
     app.enableCors({
         origin: isDev
             ? (origin, cb) => {
@@ -28,7 +29,14 @@ async function bootstrap() {
                     cb(new Error(`CORS blocked: ${origin}`), false);
                 }
             }
-            : frontendUrl,
+            : (origin, cb) => {
+                if (!origin || allowedOrigins.includes(origin)) {
+                    cb(null, true);
+                }
+                else {
+                    cb(new Error(`CORS blocked: ${origin}`), false);
+                }
+            },
         credentials: true,
         methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
         allowedHeaders: ['Content-Type', 'Authorization', 'x-request-id'],
