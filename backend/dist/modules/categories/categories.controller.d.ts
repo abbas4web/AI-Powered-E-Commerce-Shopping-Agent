@@ -3,25 +3,25 @@ export declare class CategoriesController {
     private readonly categoriesService;
     constructor(categoriesService: CategoriesService);
     findAll(): Promise<{
-        id: string;
-        slug: string;
         name: string;
-        description: string | null;
-        imageUrl: string | null;
-        parentId: string | null;
+        id: string;
         isActive: boolean;
         createdAt: Date;
         updatedAt: Date;
+        description: string | null;
+        slug: string;
+        imageUrl: string | null;
+        parentId: string | null;
     }[]>;
     findById(id: string): Promise<{
-        id: string;
-        slug: string;
         name: string;
-        description: string | null;
-        imageUrl: string | null;
-        parentId: string | null;
+        id: string;
         isActive: boolean;
         createdAt: Date;
         updatedAt: Date;
+        description: string | null;
+        slug: string;
+        imageUrl: string | null;
+        parentId: string | null;
     } | null>;
 }

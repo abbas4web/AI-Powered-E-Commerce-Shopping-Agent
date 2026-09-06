@@ -6,7 +6,7 @@ exports.aiConfig = (0, config_1.registerAs)('ai', () => ({
     provider: process.env.AI_PROVIDER ?? 'gemini',
     gemini: {
         apiKey: process.env.GEMINI_API_KEY,
-        model: process.env.GEMINI_MODEL ?? 'gemini-1.5-pro',
+        model: process.env.GEMINI_MODEL ?? 'gemini-3.6-flash',
     },
     groq: {
         apiKey: process.env.GROQ_API_KEY,

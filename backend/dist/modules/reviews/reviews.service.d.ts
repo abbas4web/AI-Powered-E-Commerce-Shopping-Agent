@@ -12,9 +12,9 @@ export declare class ReviewsService {
         id: string;
         createdAt: Date;
         updatedAt: Date;
-        rating: number;
         userId: string;
         productId: string;
+        rating: number;
         comment: string;
         sentiment: number | null;
         sentimentDetails: import("@prisma/client/runtime/library").JsonValue | null;
@@ -23,9 +23,9 @@ export declare class ReviewsService {
         id: string;
         createdAt: Date;
         updatedAt: Date;
-        rating: number;
         userId: string;
         productId: string;
+        rating: number;
         comment: string;
         sentiment: number | null;
         sentimentDetails: import("@prisma/client/runtime/library").JsonValue | null;

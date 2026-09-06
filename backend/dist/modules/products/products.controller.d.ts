@@ -5,40 +5,40 @@ export declare class ProductsController {
     constructor(productsService: ProductsService);
     findAll(pagination: PaginationDto): Promise<import("../../common/dto/pagination.dto").PaginatedResult<{
         category: {
-            id: string;
-            slug: string;
             name: string;
+            id: string;
+            isActive: boolean;
+            createdAt: Date;
+            updatedAt: Date;
             description: string | null;
+            slug: string;
             imageUrl: string | null;
             parentId: string | null;
-            isActive: boolean;
-            createdAt: Date;
-            updatedAt: Date;
         };
         brand: {
-            id: string;
-            slug: string;
             name: string;
+            id: string;
             isActive: boolean;
             createdAt: Date;
             updatedAt: Date;
+            slug: string;
             logoUrl: string | null;
             website: string | null;
         };
     } & {
-        id: string;
-        slug: string;
         name: string;
-        description: string;
-        imageUrl: string | null;
+        id: string;
         isActive: boolean;
         createdAt: Date;
         updatedAt: Date;
+        rating: number;
+        description: string;
+        slug: string;
         price: number;
         originalPrice: number | null;
+        imageUrl: string | null;
         images: string[];
         isFeatured: boolean;
-        rating: number;
         reviewCount: number;
         viewCount: number;
         specifications: import("@prisma/client/runtime/library").JsonValue;
@@ -47,40 +47,40 @@ export declare class ProductsController {
     }>>;
     findById(id: string): Promise<{
         category: {
-            id: string;
-            slug: string;
             name: string;
+            id: string;
+            isActive: boolean;
+            createdAt: Date;
+            updatedAt: Date;
             description: string | null;
+            slug: string;
             imageUrl: string | null;
             parentId: string | null;
-            isActive: boolean;
-            createdAt: Date;
-            updatedAt: Date;
         };
         brand: {
-            id: string;
-            slug: string;
             name: string;
+            id: string;
             isActive: boolean;
             createdAt: Date;
             updatedAt: Date;
+            slug: string;
             logoUrl: string | null;
             website: string | null;
         };
     } & {
-        id: string;
-        slug: string;
         name: string;
-        description: string;
-        imageUrl: string | null;
+        id: string;
         isActive: boolean;
         createdAt: Date;
         updatedAt: Date;
+        rating: number;
+        description: string;
+        slug: string;
         price: number;
         originalPrice: number | null;
+        imageUrl: string | null;
         images: string[];
         isFeatured: boolean;
-        rating: number;
         reviewCount: number;
         viewCount: number;
         specifications: import("@prisma/client/runtime/library").JsonValue;

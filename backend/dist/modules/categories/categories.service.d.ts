@@ -3,36 +3,36 @@ export declare class CategoriesService {
     private readonly prisma;
     constructor(prisma: PrismaService);
     findAll(): Promise<{
-        id: string;
-        slug: string;
         name: string;
-        description: string | null;
-        imageUrl: string | null;
-        parentId: string | null;
+        id: string;
         isActive: boolean;
         createdAt: Date;
         updatedAt: Date;
+        description: string | null;
+        slug: string;
+        imageUrl: string | null;
+        parentId: string | null;
     }[]>;
     findById(id: string): Promise<{
-        id: string;
-        slug: string;
         name: string;
-        description: string | null;
-        imageUrl: string | null;
-        parentId: string | null;
+        id: string;
         isActive: boolean;
         createdAt: Date;
         updatedAt: Date;
+        description: string | null;
+        slug: string;
+        imageUrl: string | null;
+        parentId: string | null;
     } | null>;
     findBySlug(slug: string): Promise<{
-        id: string;
-        slug: string;
         name: string;
-        description: string | null;
-        imageUrl: string | null;
-        parentId: string | null;
+        id: string;
         isActive: boolean;
         createdAt: Date;
         updatedAt: Date;
+        description: string | null;
+        slug: string;
+        imageUrl: string | null;
+        parentId: string | null;
     } | null>;
 }

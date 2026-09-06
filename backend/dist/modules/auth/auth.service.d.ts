@@ -18,16 +18,16 @@ export declare class AuthService {
         refreshToken: string;
     }>;
     validateUser(email: string, password: string): Promise<{
-        id: string;
-        isActive: boolean;
-        createdAt: Date;
-        updatedAt: Date;
-        email: string;
         password: string;
+        id: string;
+        email: string;
         firstName: string;
         lastName: string;
         avatarUrl: string | null;
         role: import(".prisma/client").$Enums.UserRole;
+        isActive: boolean;
+        createdAt: Date;
+        updatedAt: Date;
     }>;
     refreshToken(token: string): Promise<{
         accessToken: string;
