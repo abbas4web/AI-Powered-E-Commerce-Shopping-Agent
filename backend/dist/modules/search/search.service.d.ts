@@ -49,5 +49,6 @@ export declare class SearchService {
         categoryId: string;
         brandId: string;
     }>>;
+    searchProductsByName(query: string): Promise<unknown[]>;
     detectCategorySlug(query: string): string | null;
 }

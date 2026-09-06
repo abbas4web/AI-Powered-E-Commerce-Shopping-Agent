@@ -83,13 +83,9 @@ Return [] if no specific products are named.`,
                 const names = JSON.parse(raw);
                 const ids = [];
                 for (const name of names.slice(0, 4)) {
-                    const result = await this.searchService.searchProducts({
-                        query: name,
-                        limit: 1,
-                    });
-                    const first = result.items[0];
-                    if (first?.id)
-                        ids.push(first.id);
+                    const found = await this.findProductByName(name);
+                    if (found)
+                        ids.push(found);
                 }
                 return ids;
             }
@@ -98,6 +94,16 @@ Return [] if no specific products are named.`,
             this.logger.warn(`Product name resolution failed: ${err.message}`);
         }
         return [];
+    }
+    async findProductByName(name) {
+        const keywords = name
+            .replace(/[()]/g, '')
+            .split(' ')
+            .filter((w) => w.length > 2)
+            .slice(0, 3)
+            .join(' ');
+        const results = await this.searchService.searchProductsByName(keywords);
+        return results[0]?.id ?? null;
     }
 };
 exports.CompareAgent = CompareAgent;

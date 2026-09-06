@@ -73,6 +73,17 @@ let SearchService = class SearchService {
         this.logger.debug(`Search for "${query}" returned ${total} results`);
         return (0, pagination_dto_1.paginate)(products, total, page, limit);
     }
+    async searchProductsByName(query) {
+        return this.prisma.product.findMany({
+            where: {
+                isActive: true,
+                name: { contains: query, mode: 'insensitive' },
+            },
+            include: { category: true, brand: true },
+            orderBy: { rating: 'desc' },
+            take: 1,
+        });
+    }
     detectCategorySlug(query) {
         const lower = query.toLowerCase();
         for (const [slug, keywords] of Object.entries(CATEGORY_KEYWORDS)) {

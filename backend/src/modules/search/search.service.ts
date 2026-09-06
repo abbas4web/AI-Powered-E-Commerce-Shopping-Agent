@@ -88,6 +88,20 @@ export class SearchService {
     return paginate(products, total, page, limit);
   }
 
+  /** Search products by name only — no category auto-detection, no price filter.
+   *  Used by CompareAgent to find specific products the user named. */
+  async searchProductsByName(query: string): Promise<unknown[]> {
+    return this.prisma.product.findMany({
+      where: {
+        isActive: true,
+        name: { contains: query, mode: 'insensitive' },
+      },
+      include: { category: true, brand: true },
+      orderBy: { rating: 'desc' },
+      take: 1,
+    });
+  }
+
   /** Map a query keyword to a category slug */
   detectCategorySlug(query: string): string | null {
     const lower = query.toLowerCase();

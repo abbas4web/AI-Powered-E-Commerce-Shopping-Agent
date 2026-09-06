@@ -100,15 +100,10 @@ Return [] if no specific products are named.`,
         const names = JSON.parse(raw) as string[];
         const ids: string[] = [];
 
-        // Search each product name and take the top result
         for (const name of names.slice(0, 4)) {
-          const result = await this.searchService.searchProducts({
-            query: name,
-            limit: 1,
-          });
-          type PrismaProduct = { id: string };
-          const first = (result.items as PrismaProduct[])[0];
-          if (first?.id) ids.push(first.id);
+          // Use direct Prisma search by name — bypass category auto-detection
+          const found = await this.findProductByName(name);
+          if (found) ids.push(found);
         }
 
         return ids;
@@ -118,5 +113,20 @@ Return [] if no specific products are named.`,
     }
 
     return [];
+  }
+
+  /** Search for a product by name fragments — bypasses category auto-detection */
+  private async findProductByName(name: string): Promise<string | null> {
+    // Use the 2-3 most distinctive words from the name
+    const keywords = name
+      .replace(/[()]/g, '')
+      .split(' ')
+      .filter((w) => w.length > 2)
+      .slice(0, 3)
+      .join(' ');
+
+    const results = await this.searchService.searchProductsByName(keywords);
+    type PrismaProduct = { id: string };
+    return (results[0] as PrismaProduct)?.id ?? null;
   }
 }

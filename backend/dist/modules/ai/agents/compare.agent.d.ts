@@ -10,4 +10,5 @@ export declare class CompareAgent implements IAgent {
     constructor(aiProvider: IAIProvider, comparisonsService: ComparisonsService, searchService: SearchService);
     run(context: AgentContext): Promise<AgentContext>;
     private resolveProductIdsFromMessage;
+    private findProductByName;
 }
