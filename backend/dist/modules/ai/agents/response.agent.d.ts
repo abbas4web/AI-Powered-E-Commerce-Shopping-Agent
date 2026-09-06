@@ -6,10 +6,15 @@ export declare class ResponseAgent implements IAgent {
     constructor(aiProvider: IAIProvider);
     run(context: AgentContext): Promise<AgentContext>;
     private handleSearchResponse;
+    private handleFollowUpResponse;
     private handleCompareResponse;
     private handleDetailsResponse;
+    private handleWishlistResponse;
+    private handleRecommendationsResponse;
     private handleGeneralResponse;
-    private buildNoResultsMessage;
+    private generateSearchResponse;
+    private generateNoResultsResponse;
+    private generateGeneralAnswer;
     private buildFallbackMessage;
-    private buildFollowUpQuestions;
+    private buildFollowUps;
 }

@@ -1,4 +1,4 @@
-export type AgentIntent = 'PRODUCT_SEARCH' | 'PRODUCT_COMPARE' | 'PRODUCT_DETAILS' | 'WISHLIST' | 'RECOMMENDATIONS' | 'GENERAL';
+export type AgentIntent = 'PRODUCT_SEARCH' | 'PRODUCT_COMPARE' | 'PRODUCT_DETAILS' | 'FOLLOWUP_SEARCH' | 'WISHLIST' | 'RECOMMENDATIONS' | 'GENERAL';
 export interface ExtractedRequirements {
     query: string;
     minPrice?: number;
@@ -66,6 +66,8 @@ export interface AgentContext {
     }>;
     intent?: AgentIntent;
     mentionedProductIds?: string[];
+    previousSearchResults?: RankedProduct[];
+    conversationSummary?: string;
     requirements?: ExtractedRequirements;
     searchResults?: SlimProduct[];
     totalFound?: number;

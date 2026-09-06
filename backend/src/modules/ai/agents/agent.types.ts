@@ -3,22 +3,23 @@
  *
  * Flow:
  *   User message
- *     → RouterAgent       (classifies intent)
- *     → SearchAgent       (extracts requirements + searches DB)
- *     → CompareAgent      (side-by-side comparison, if intent = COMPARE)
- *     → RankingAgent      (deterministic scoring)
- *     → ResponseAgent     (writes final human-readable text)
+ *     → RouterAgent       (classify intent + extract context)
+ *     → SearchAgent       (extract requirements + search DB)  [SEARCH/DETAILS]
+ *     → CompareAgent      (side-by-side comparison)           [COMPARE]
+ *     → RankingAgent      (deterministic scoring)             [SEARCH/DETAILS]
+ *     → ResponseAgent     (write final human-readable text)
  */
 
 // ─── Intent ──────────────────────────────────────────────────────────────────
 
 export type AgentIntent =
-  | 'PRODUCT_SEARCH'    // "I need a laptop under 80k"
-  | 'PRODUCT_COMPARE'   // "Compare ASUS vs Dell"
-  | 'PRODUCT_DETAILS'   // "Tell me more about the MacBook"
-  | 'WISHLIST'          // "Add this to my wishlist"
-  | 'RECOMMENDATIONS'   // "Show my saved recommendations"
-  | 'GENERAL';          // Greetings, general questions
+  | 'PRODUCT_SEARCH'      // "I need a laptop under 80k"
+  | 'PRODUCT_COMPARE'     // "ASUS vs Dell" / "compare these two"
+  | 'PRODUCT_DETAILS'     // "Tell me more about the MacBook"
+  | 'FOLLOWUP_SEARCH'     // "which is best?" / "only ASUS" (context-dependent)
+  | 'WISHLIST'            // "add to wishlist"
+  | 'RECOMMENDATIONS'     // "show my recommendations"
+  | 'GENERAL';            // greetings, general questions, anything else
 
 // ─── Requirements extracted from user message ─────────────────────────────
 
@@ -96,8 +97,16 @@ export interface AgentContext {
 
   // Set by RouterAgent
   intent?: AgentIntent;
-  // Product IDs mentioned for compare/details
   mentionedProductIds?: string[];
+
+  // ── Conversation continuity ────────────────────────────────────────────
+  // Products from the PREVIOUS turn — used for follow-up questions like
+  // "which is best?" / "compare these" / "tell me more about the first one"
+  previousSearchResults?: RankedProduct[];
+
+  // A short plain-text summary of the conversation so far.
+  // Injected by the orchestrator before each turn.
+  conversationSummary?: string;
 
   // Set by SearchAgent
   requirements?: ExtractedRequirements;

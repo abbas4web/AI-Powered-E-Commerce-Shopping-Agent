@@ -32,5 +32,6 @@ export declare class AiOrchestratorService {
         }[];
         followUpQuestions: string[];
     }>;
+    private followUpNeedsNewSearch;
     private persistRecommendations;
 }

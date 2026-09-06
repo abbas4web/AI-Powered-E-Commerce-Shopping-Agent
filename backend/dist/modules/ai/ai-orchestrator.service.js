@@ -35,53 +35,78 @@ let AiOrchestratorService = class AiOrchestratorService {
         const conversation = conversationId
             ? await this.conversationsService.findById(conversationId, userId)
             : await this.conversationsService.create(userId, message);
-        const history = conversation.messages.map((m) => ({
+        const storedMessages = conversation.messages;
+        const history = storedMessages.map((m) => ({
             role: m.role,
             content: m.content,
         }));
+        const structuredState = conversation.structuredState ?? {};
+        const previousSearchResults = structuredState.lastRankedProducts ?? [];
         let context = {
             userId,
             conversationId: conversation.id,
             originalMessage: message,
             history,
+            previousSearchResults,
         };
         const pipelineTrace = [];
         try {
-            this.logger.debug(`[Pipeline] Step 1 — RouterAgent`);
+            this.logger.debug(`[Pipeline] RouterAgent`);
             context = await this.routerAgent.run(context);
-            pipelineTrace.push(`RouterAgent → intent: ${context.intent}`);
-            this.logger.debug(`[Pipeline] Intent: ${context.intent}`);
+            pipelineTrace.push(`RouterAgent → ${context.intent}`);
             switch (context.intent) {
                 case 'PRODUCT_SEARCH':
                 case 'PRODUCT_DETAILS':
-                    this.logger.debug(`[Pipeline] Step 2 — SearchAgent`);
+                    this.logger.debug(`[Pipeline] SearchAgent`);
                     context = await this.searchAgent.run(context);
-                    pipelineTrace.push(`SearchAgent → found: ${context.totalFound} products, query: "${context.requirements?.query}"`);
-                    this.logger.debug(`[Pipeline] Step 3 — RankingAgent`);
+                    pipelineTrace.push(`SearchAgent → found ${context.totalFound}, query: "${context.requirements?.query}"`);
+                    this.logger.debug(`[Pipeline] RankingAgent`);
                     context = await this.rankingAgent.run(context);
-                    pipelineTrace.push(`RankingAgent → ranked: ${context.rankedProducts?.length}, top score: ${context.rankedProducts?.[0]?.score}`);
+                    pipelineTrace.push(`RankingAgent → ranked ${context.rankedProducts?.length}, top: ${context.rankedProducts?.[0]?.score}`);
                     break;
+                case 'FOLLOWUP_SEARCH': {
+                    const needsNewSearch = this.followUpNeedsNewSearch(message);
+                    if (needsNewSearch) {
+                        this.logger.debug(`[Pipeline] FOLLOWUP — re-search with refinement`);
+                        context = await this.searchAgent.run(context);
+                        pipelineTrace.push(`SearchAgent (follow-up) → found ${context.totalFound}`);
+                        context = await this.rankingAgent.run(context);
+                        pipelineTrace.push(`RankingAgent → ranked ${context.rankedProducts?.length}`);
+                    }
+                    else {
+                        this.logger.debug(`[Pipeline] FOLLOWUP — using previous results`);
+                        pipelineTrace.push(`FOLLOWUP → using ${previousSearchResults.length} previous results`);
+                    }
+                    break;
+                }
                 case 'PRODUCT_COMPARE':
-                    this.logger.debug(`[Pipeline] Step 2 — CompareAgent`);
+                    this.logger.debug(`[Pipeline] CompareAgent`);
                     context = await this.compareAgent.run(context);
-                    pipelineTrace.push(`CompareAgent → compared: ${context.comparisonResult?.products.length ?? 0} products`);
+                    pipelineTrace.push(`CompareAgent → ${context.comparisonResult?.products.length ?? 0} products`);
                     if (context.intent === 'PRODUCT_SEARCH') {
-                        this.logger.debug(`[Pipeline] Compare fallback → SearchAgent`);
-                        pipelineTrace.push(`CompareAgent → fallback to SearchAgent`);
                         context = await this.searchAgent.run(context);
                         context = await this.rankingAgent.run(context);
-                        pipelineTrace.push(`RankingAgent → ranked: ${context.rankedProducts?.length}`);
+                        pipelineTrace.push(`CompareAgent fallback → SearchAgent+RankingAgent`);
                     }
                     break;
                 case 'GENERAL':
                 case 'WISHLIST':
                 case 'RECOMMENDATIONS':
-                    pipelineTrace.push(`${context.intent} → no search needed`);
+                    pipelineTrace.push(`${context.intent} → ResponseAgent direct`);
                     break;
             }
-            this.logger.debug(`[Pipeline] Step 4 — ResponseAgent`);
+            this.logger.debug(`[Pipeline] ResponseAgent`);
             context = await this.responseAgent.run(context);
-            pipelineTrace.push(`ResponseAgent → message generated`);
+            pipelineTrace.push(`ResponseAgent → done`);
+            const newRankedProducts = context.rankedProducts ?? previousSearchResults;
+            if (newRankedProducts.length) {
+                await this.conversationsService.updateStructuredState(conversation.id, {
+                    ...structuredState,
+                    lastRankedProducts: newRankedProducts.slice(0, 10),
+                    lastRequirements: context.requirements,
+                    lastIntent: context.intent,
+                }).catch((err) => this.logger.warn(`Failed to update structured state: ${err.message}`));
+            }
             if (context.rankedProducts?.length) {
                 await this.persistRecommendations(userId, conversation.id, context.rankedProducts).catch((err) => this.logger.warn(`Failed to persist recommendations: ${err.message}`));
             }
@@ -92,17 +117,18 @@ let AiOrchestratorService = class AiOrchestratorService {
             const msg = err.message ?? 'Unknown error';
             this.logger.error(`Pipeline failed: ${msg}`, err.stack);
             context.finalMessage = 'Sorry, something went wrong. Please try again.';
-            context.rankedProducts = [];
+            context.rankedProducts = previousSearchResults;
             context.followUpQuestions = [];
         }
         await this.conversationsService.addMessage(conversation.id, 'user', message);
         await this.conversationsService.addMessage(conversation.id, 'assistant', context.finalMessage ?? '');
         const isDev = process.env.NODE_ENV !== 'production';
+        const productsToShow = context.rankedProducts ?? [];
         return {
             conversationId: conversation.id,
             message: context.finalMessage ?? '',
             intent: context.intent ?? 'GENERAL',
-            products: (context.rankedProducts ?? []).map((p) => ({
+            products: productsToShow.map((p) => ({
                 productId: p.productId,
                 score: p.score,
                 reason: p.matchedRequirements.length
@@ -115,13 +141,24 @@ let AiOrchestratorService = class AiOrchestratorService {
             ...(isDev && { debug: { pipeline: pipelineTrace } }),
         };
     }
+    followUpNeedsNewSearch(message) {
+        const lower = message.toLowerCase().trim();
+        const needsNewSearch = [
+            /only\s+\w+/,
+            /increase.*(budget|price)/,
+            /decrease.*(budget|price)/,
+            /change.*(budget|price|range)/,
+            /under\s+[\d,₹]+/,
+            /above\s+[\d,₹]+/,
+            /\b(add|include)\s+\w+\s+brand/,
+        ];
+        return needsNewSearch.some((p) => p.test(lower));
+    }
     async persistRecommendations(userId, conversationId, rankedProducts) {
-        if (!rankedProducts?.length)
-            return;
         const top5 = rankedProducts.slice(0, 5);
         await Promise.all(top5.map((p) => this.recommendationsService.saveRecommendation(userId, p.productId, p.score, p.matchedRequirements.length
             ? `Matches: ${p.matchedRequirements.join(', ')}`
-            : `Top match for your search`, p.matchedRequirements, conversationId)));
+            : 'Top match for your search', p.matchedRequirements, conversationId)));
     }
 };
 exports.AiOrchestratorService = AiOrchestratorService;
