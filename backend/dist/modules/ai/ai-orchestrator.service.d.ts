@@ -18,6 +18,7 @@ export declare class AiOrchestratorService {
         followUpQuestions: string[];
     }>;
     private extractRequirements;
+    private buildTextOnlyPrompt;
     private buildRecommendationPrompt;
     private buildChatSystemPrompt;
     private callAI;

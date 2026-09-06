@@ -49,9 +49,35 @@ let AiOrchestratorService = class AiOrchestratorService {
                     limit: 10,
                 });
                 this.logger.debug(`Search returned ${searchResults.total} products`);
-                const prompt = this.buildRecommendationPrompt(message, history, searchResults, requirements);
-                const aiResponse = await this.callAI([{ role: 'user', content: prompt }], undefined, 4000);
-                finalResponse = aiResponse.content ?? '';
+                if (searchResults.items.length === 0) {
+                    const noResultPrompt = `You are SmartShop AI. A user searched for "${message}" but we found no matching products in our catalog. Politely inform them and suggest they broaden their search or adjust their budget. Keep it brief and helpful. Return plain text only.`;
+                    const noResultResponse = await this.callAI([{ role: 'user', content: noResultPrompt }], undefined, 512);
+                    finalResponse = noResultResponse.content ?? 'No products found matching your criteria. Try adjusting your budget or search terms.';
+                    structuredData = { intent: 'PRODUCT_SEARCH', products: [], followUpQuestions: [] };
+                }
+                else {
+                    const textPrompt = this.buildTextOnlyPrompt(message, history, searchResults, requirements);
+                    const aiResponse = await this.callAI([{ role: 'user', content: textPrompt }], undefined, 2048);
+                    finalResponse = aiResponse.content ?? '';
+                    const maxPrice = requirements.maxPrice;
+                    const rankedProducts = searchResults.items
+                        .filter((p) => !maxPrice || p.price <= maxPrice)
+                        .map((p, idx) => ({
+                        productId: p.id,
+                        score: Math.max(95 - idx * 5, 60),
+                        reason: `${p.name} matches your requirements`,
+                        matchedRequirements: [
+                            ...(maxPrice ? ['budget'] : []),
+                            'specifications',
+                        ],
+                        warnings: [],
+                    }));
+                    structuredData = {
+                        intent: 'PRODUCT_RECOMMENDATION',
+                        products: rankedProducts,
+                        followUpQuestions: [],
+                    };
+                }
             }
             else {
                 const aiResponse = await this.callAI([...history, { role: 'user', content: message }], this.buildChatSystemPrompt(), 1024);
@@ -63,7 +89,7 @@ let AiOrchestratorService = class AiOrchestratorService {
                 throw err;
             const errorMsg = err.message ?? 'Unknown error';
             this.logger.error(`AI processing failed: ${errorMsg}`, err.stack);
-            finalResponse = `Sorry, I encountered an issue: ${errorMsg}. Please try again.`;
+            finalResponse = 'Sorry, I encountered an issue. Please try again.';
         }
         try {
             const cleaned = finalResponse
@@ -73,12 +99,11 @@ let AiOrchestratorService = class AiOrchestratorService {
                 .trim();
             if (cleaned.startsWith('{')) {
                 const parsed = JSON.parse(cleaned);
-                finalResponse = parsed.message ?? finalResponse;
-                structuredData = parsed;
+                if (parsed.message)
+                    finalResponse = parsed.message;
             }
         }
-        catch (e) {
-            this.logger.warn(`Failed to parse AI JSON response: ${e.message}`);
+        catch {
         }
         await this.conversationsService.addMessage(conversation.id, 'user', message);
         await this.conversationsService.addMessage(conversation.id, 'assistant', finalResponse);
@@ -118,54 +143,33 @@ Return ONLY the JSON, nothing else.`;
         }
         return { query: message };
     }
-    buildRecommendationPrompt(userMessage, history, searchResults, requirements) {
+    buildTextOnlyPrompt(userMessage, history, searchResults, requirements) {
         const historyText = history.length > 0
             ? `Previous conversation:\n${history.slice(-4).map((m) => `${m.role}: ${m.content}`).join('\n')}\n\n`
             : '';
-        const slimProducts = searchResults.items.map((p) => ({
-            id: p.id,
-            name: p.name,
-            price: p.price,
-            originalPrice: p.originalPrice,
-            brand: p.brand?.name,
-            category: p.category?.name,
-            rating: p.rating,
-            reviewCount: p.reviewCount,
-            description: (p.description ?? '').slice(0, 120),
-            specs: p.specifications,
-        }));
-        const count = slimProducts.length;
-        const productsJson = JSON.stringify(slimProducts, null, 2);
-        return `${historyText}You are SmartShop AI. A user is shopping for products on an Indian e-commerce platform.
+        const productList = searchResults.items
+            .map((p, i) => `${i + 1}. ${p.name} by ${p.brand?.name ?? 'Unknown'} — ₹${p.price.toLocaleString('en-IN')}` +
+            ` (Rating: ${p.rating ?? 'N/A'}/5)\n   ${(p.description ?? '').slice(0, 150)}`)
+            .join('\n\n');
+        return `${historyText}You are SmartShop AI, a helpful shopping assistant for an Indian e-commerce platform.
 
-User request: "${userMessage}"
-Budget: ${requirements.maxPrice ? `under ₹${requirements.maxPrice}` : 'not specified'}
+User asked: "${userMessage}"
+${requirements.maxPrice ? `Budget: under ₹${requirements.maxPrice.toLocaleString('en-IN')}` : ''}
 
-Our database returned these ${count} matching products:
-${productsJson}
+Here are the matching products from our catalog:
 
-Your task:
-- Write a helpful shopping recommendation based ONLY on the products above
-- Mention ALL ${count} products by name with their price
-- Explain why each product is suitable for the user's needs
-- Use actual specs from the data (RAM, processor, battery, etc.)
-- Rank them from best match to least suitable
+${productList}
 
-You MUST return valid JSON in exactly this format:
-{
-  "message": "Your recommendation text here — mention all ${count} products with names and prices",
-  "intent": "PRODUCT_RECOMMENDATION",
-  "products": [
-    {"productId": "${slimProducts[0]?.id ?? 'id1'}", "score": 90, "reason": "reason", "matchedRequirements": ["budget"], "warnings": []},
-    {"productId": "${slimProducts[1]?.id ?? 'id2'}", "score": 85, "reason": "reason", "matchedRequirements": ["budget"], "warnings": []}
-  ],
-  "followUpQuestions": ["One follow-up question"]
-}
+Write a helpful, conversational recommendation that:
+1. Mentions ALL ${searchResults.items.length} products by name with their price
+2. Explains what each is good for based on its specs/description
+3. Suggests which is best overall for the user's needs
+4. Is friendly and easy to read
 
-CRITICAL RULES:
-1. The "products" array MUST have ${count} entries — one per product above
-2. Use the exact "id" values from the product data
-3. Return ONLY valid JSON — no text before or after the JSON`;
+Write in plain text — no JSON, no markdown headers. Just helpful paragraphs.`;
+    }
+    buildRecommendationPrompt(userMessage, history, searchResults, requirements) {
+        return this.buildTextOnlyPrompt(userMessage, history, searchResults, requirements);
     }
     buildChatSystemPrompt() {
         return `You are SmartShop AI, a helpful shopping assistant for an Indian e-commerce platform.

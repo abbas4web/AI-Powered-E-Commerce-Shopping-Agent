@@ -48,22 +48,51 @@ export class AiOrchestratorService {
         });
         this.logger.debug(`Search returned ${searchResults.total} products`);
 
-        // ── Phase 3: AI generates recommendation from real data ──────────
-        const prompt = this.buildRecommendationPrompt(
-          message,
-          history,
-          searchResults,
-          requirements,
-        );
+        if (searchResults.items.length === 0) {
+          // No results — ask AI to respond gracefully
+          const noResultPrompt = `You are SmartShop AI. A user searched for "${message}" but we found no matching products in our catalog. Politely inform them and suggest they broaden their search or adjust their budget. Keep it brief and helpful. Return plain text only.`;
+          const noResultResponse = await this.callAI(
+            [{ role: 'user', content: noResultPrompt }],
+            undefined,
+            512,
+          );
+          finalResponse = noResultResponse.content ?? 'No products found matching your criteria. Try adjusting your budget or search terms.';
+          structuredData = { intent: 'PRODUCT_SEARCH', products: [], followUpQuestions: [] };
+        } else {
+          // ── Phase 3: AI writes recommendation TEXT only ───────────────
+          // The products array is built deterministically — NOT by the AI
+          const textPrompt = this.buildTextOnlyPrompt(message, history, searchResults, requirements);
+          const aiResponse = await this.callAI(
+            [{ role: 'user', content: textPrompt }],
+            undefined,
+            2048,
+          );
 
-        // Use higher token limit for recommendation responses
-        const aiResponse = await this.callAI(
-          [{ role: 'user', content: prompt }],
-          undefined,
-          4000,
-        );
+          finalResponse = aiResponse.content ?? '';
 
-        finalResponse = aiResponse.content ?? '';
+          // ── Build products array deterministically from search results ─
+          type PrismaProduct = { id: string; name: string; price: number; [key: string]: unknown };
+          const maxPrice = requirements.maxPrice as number | undefined;
+
+          const rankedProducts = (searchResults.items as PrismaProduct[])
+            .filter((p) => !maxPrice || p.price <= maxPrice)
+            .map((p, idx) => ({
+              productId: p.id,
+              score: Math.max(95 - idx * 5, 60),
+              reason: `${p.name} matches your requirements`,
+              matchedRequirements: [
+                ...(maxPrice ? ['budget'] : []),
+                'specifications',
+              ],
+              warnings: [] as string[],
+            }));
+
+          structuredData = {
+            intent: 'PRODUCT_RECOMMENDATION',
+            products: rankedProducts,
+            followUpQuestions: [],
+          };
+        }
       } else {
         // General conversation
         const aiResponse = await this.callAI(
@@ -77,25 +106,23 @@ export class AiOrchestratorService {
       if (err instanceof HttpException) throw err;
       const errorMsg = (err as Error).message ?? 'Unknown error';
       this.logger.error(`AI processing failed: ${errorMsg}`, (err as Error).stack);
-      finalResponse = `Sorry, I encountered an issue: ${errorMsg}. Please try again.`;
+      finalResponse = 'Sorry, I encountered an issue. Please try again.';
     }
 
-    // Parse structured JSON response from AI
+    // Strip any accidental JSON wrapping from AI text response
     try {
       const cleaned = finalResponse
         .replace(/^```json\s*/im, '')
         .replace(/^```\s*/im, '')
         .replace(/```\s*$/im, '')
         .trim();
-
       if (cleaned.startsWith('{')) {
         const parsed = JSON.parse(cleaned) as Record<string, unknown>;
-        finalResponse = (parsed.message as string) ?? finalResponse;
-        structuredData = parsed;
+        // Only use message field if AI returned JSON — ignore its products array
+        if (parsed.message) finalResponse = parsed.message as string;
       }
-    } catch (e) {
-      this.logger.warn(`Failed to parse AI JSON response: ${(e as Error).message}`);
-      // Plain text response — use as-is
+    } catch {
+      // Plain text — use as-is
     }
 
     await this.conversationsService.addMessage(conversation.id, 'user', message);
@@ -141,7 +168,7 @@ Return ONLY the JSON, nothing else.`;
     return { query: message };
   }
 
-  private buildRecommendationPrompt(
+  private buildTextOnlyPrompt(
     userMessage: string,
     history: ChatMessage[],
     searchResults: { items: unknown[]; total: number },
@@ -151,68 +178,49 @@ Return ONLY the JSON, nothing else.`;
       ? `Previous conversation:\n${history.slice(-4).map((m) => `${m.role}: ${m.content}`).join('\n')}\n\n`
       : '';
 
-    // Slim product objects — only fields the AI needs, no full nested objects
     type PrismaProduct = {
       id: string;
       name: string;
       price: number;
       originalPrice?: number | null;
       rating?: number;
-      reviewCount?: number;
       description?: string;
       specifications?: unknown;
       brand?: { name: string };
-      category?: { name: string };
     };
 
-    const slimProducts = (searchResults.items as PrismaProduct[]).map((p) => ({
-      id: p.id,
-      name: p.name,
-      price: p.price,
-      originalPrice: p.originalPrice,
-      brand: p.brand?.name,
-      category: p.category?.name,
-      rating: p.rating,
-      reviewCount: p.reviewCount,
-      // Trim description to save tokens
-      description: (p.description ?? '').slice(0, 120),
-      // Only include key specs
-      specs: p.specifications,
-    }));
+    const productList = (searchResults.items as PrismaProduct[])
+      .map((p, i) =>
+        `${i + 1}. ${p.name} by ${p.brand?.name ?? 'Unknown'} — ₹${p.price.toLocaleString('en-IN')}` +
+        ` (Rating: ${p.rating ?? 'N/A'}/5)\n   ${(p.description ?? '').slice(0, 150)}`,
+      )
+      .join('\n\n');
 
-    const count = slimProducts.length;
-    const productsJson = JSON.stringify(slimProducts, null, 2);
+    return `${historyText}You are SmartShop AI, a helpful shopping assistant for an Indian e-commerce platform.
 
-    return `${historyText}You are SmartShop AI. A user is shopping for products on an Indian e-commerce platform.
+User asked: "${userMessage}"
+${requirements.maxPrice ? `Budget: under ₹${(requirements.maxPrice as number).toLocaleString('en-IN')}` : ''}
 
-User request: "${userMessage}"
-Budget: ${requirements.maxPrice ? `under ₹${requirements.maxPrice}` : 'not specified'}
+Here are the matching products from our catalog:
 
-Our database returned these ${count} matching products:
-${productsJson}
+${productList}
 
-Your task:
-- Write a helpful shopping recommendation based ONLY on the products above
-- Mention ALL ${count} products by name with their price
-- Explain why each product is suitable for the user's needs
-- Use actual specs from the data (RAM, processor, battery, etc.)
-- Rank them from best match to least suitable
+Write a helpful, conversational recommendation that:
+1. Mentions ALL ${searchResults.items.length} products by name with their price
+2. Explains what each is good for based on its specs/description
+3. Suggests which is best overall for the user's needs
+4. Is friendly and easy to read
 
-You MUST return valid JSON in exactly this format:
-{
-  "message": "Your recommendation text here — mention all ${count} products with names and prices",
-  "intent": "PRODUCT_RECOMMENDATION",
-  "products": [
-    {"productId": "${slimProducts[0]?.id ?? 'id1'}", "score": 90, "reason": "reason", "matchedRequirements": ["budget"], "warnings": []},
-    {"productId": "${slimProducts[1]?.id ?? 'id2'}", "score": 85, "reason": "reason", "matchedRequirements": ["budget"], "warnings": []}
-  ],
-  "followUpQuestions": ["One follow-up question"]
-}
+Write in plain text — no JSON, no markdown headers. Just helpful paragraphs.`;
+  }
 
-CRITICAL RULES:
-1. The "products" array MUST have ${count} entries — one per product above
-2. Use the exact "id" values from the product data
-3. Return ONLY valid JSON — no text before or after the JSON`;
+  private buildRecommendationPrompt(
+    userMessage: string,
+    history: ChatMessage[],
+    searchResults: { items: unknown[]; total: number },
+    requirements: Record<string, unknown>,
+  ): string {
+    return this.buildTextOnlyPrompt(userMessage, history, searchResults, requirements);
   }
 
   private buildChatSystemPrompt(): string {
