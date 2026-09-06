@@ -12,20 +12,37 @@ const config_1 = require("@nestjs/config");
 const ai_controller_1 = require("./ai.controller");
 const ai_service_1 = require("./ai.service");
 const ai_orchestrator_service_1 = require("./ai-orchestrator.service");
-const tool_dispatcher_service_1 = require("./tools/tool-dispatcher.service");
 const gemini_provider_1 = require("./providers/gemini.provider");
 const groq_provider_1 = require("./providers/groq.provider");
 const ai_provider_interface_1 = require("./interfaces/ai-provider.interface");
+const router_agent_1 = require("./agents/router.agent");
+const search_agent_1 = require("./agents/search.agent");
+const compare_agent_1 = require("./agents/compare.agent");
+const ranking_agent_1 = require("./agents/ranking.agent");
+const response_agent_1 = require("./agents/response.agent");
+const tool_dispatcher_service_1 = require("./tools/tool-dispatcher.service");
 const search_module_1 = require("../search/search.module");
 const products_module_1 = require("../products/products.module");
+const comparisons_module_1 = require("../comparisons/comparisons.module");
 const recommendations_module_1 = require("../recommendations/recommendations.module");
 const conversations_module_1 = require("../conversations/conversations.module");
+const wishlist_module_1 = require("../wishlist/wishlist.module");
+const preferences_module_1 = require("../preferences/preferences.module");
 let AiModule = class AiModule {
 };
 exports.AiModule = AiModule;
 exports.AiModule = AiModule = __decorate([
     (0, common_1.Module)({
-        imports: [config_1.ConfigModule, search_module_1.SearchModule, products_module_1.ProductsModule, recommendations_module_1.RecommendationsModule, conversations_module_1.ConversationsModule],
+        imports: [
+            config_1.ConfigModule,
+            search_module_1.SearchModule,
+            products_module_1.ProductsModule,
+            comparisons_module_1.ComparisonsModule,
+            recommendations_module_1.RecommendationsModule,
+            conversations_module_1.ConversationsModule,
+            wishlist_module_1.WishlistModule,
+            preferences_module_1.PreferencesModule,
+        ],
         controllers: [ai_controller_1.AiController],
         providers: [
             gemini_provider_1.GeminiProvider,
@@ -38,8 +55,13 @@ exports.AiModule = AiModule = __decorate([
                     return provider === 'groq' ? groq : gemini;
                 },
             },
-            ai_service_1.AiService,
+            router_agent_1.RouterAgent,
+            search_agent_1.SearchAgent,
+            compare_agent_1.CompareAgent,
+            ranking_agent_1.RankingAgent,
+            response_agent_1.ResponseAgent,
             ai_orchestrator_service_1.AiOrchestratorService,
+            ai_service_1.AiService,
             tool_dispatcher_service_1.ToolDispatcherService,
         ],
         exports: [ai_service_1.AiService],

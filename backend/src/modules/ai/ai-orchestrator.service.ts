@@ -1,260 +1,176 @@
-import { Inject, Injectable, HttpException, HttpStatus } from '@nestjs/common';
-import { AI_PROVIDER, IAIProvider, ChatMessage } from './interfaces/ai-provider.interface';
+import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
 import { AppLogger } from '../../common/logger/logger.service';
 import { ChatRequestDto } from './dto/chat-request.dto';
-import { ToolDispatcherService } from './tools/tool-dispatcher.service';
 import { ConversationsService } from '../conversations/conversations.service';
-import { SearchService } from '../search/search.service';
+import { RecommendationsService } from '../recommendations/recommendations.service';
+import { RouterAgent } from './agents/router.agent';
+import { SearchAgent } from './agents/search.agent';
+import { CompareAgent } from './agents/compare.agent';
+import { RankingAgent } from './agents/ranking.agent';
+import { ResponseAgent } from './agents/response.agent';
+import { AgentContext } from './agents/agent.types';
 
+/**
+ * AiOrchestratorService — coordinates the multi-agent pipeline.
+ *
+ * Pipeline:
+ *
+ *   User message
+ *     → RouterAgent      (classify intent)
+ *     → SearchAgent      (extract requirements + search DB)  [SEARCH/DETAILS only]
+ *     → CompareAgent     (fetch comparison matrix)           [COMPARE only]
+ *     → RankingAgent     (deterministic scoring)             [SEARCH/DETAILS only]
+ *     → ResponseAgent    (write final text)
+ *
+ * The orchestrator does NOT call the AI directly — each agent handles its own AI calls.
+ * The orchestrator only manages flow, conversation persistence, and the final response shape.
+ */
 @Injectable()
 export class AiOrchestratorService {
   private readonly logger = new AppLogger('AiOrchestrator');
 
   constructor(
-    @Inject(AI_PROVIDER) private readonly aiProvider: IAIProvider,
-    private readonly toolDispatcher: ToolDispatcherService,
     private readonly conversationsService: ConversationsService,
-    private readonly searchService: SearchService,
+    private readonly recommendationsService: RecommendationsService,
+    private readonly routerAgent: RouterAgent,
+    private readonly searchAgent: SearchAgent,
+    private readonly compareAgent: CompareAgent,
+    private readonly rankingAgent: RankingAgent,
+    private readonly responseAgent: ResponseAgent,
   ) {}
 
   async processMessage(userId: string, dto: ChatRequestDto) {
     const { message, conversationId } = dto;
 
+    // ── Load or create conversation ──────────────────────────────────────────
     const conversation = conversationId
       ? await this.conversationsService.findById(conversationId, userId)
       : await this.conversationsService.create(userId, message);
 
     type StoredMessage = { role: string; content: string; timestamp: string };
-    const history: ChatMessage[] = (conversation.messages as StoredMessage[]).map((m) => ({
+    const history = (conversation.messages as StoredMessage[]).map((m) => ({
       role: m.role as 'user' | 'assistant',
       content: m.content,
     }));
 
-    let finalResponse = '';
-    let structuredData: Record<string, unknown> = {};
+    // ── Build initial context ────────────────────────────────────────────────
+    let context: AgentContext = {
+      userId,
+      conversationId: conversation.id,
+      originalMessage: message,
+      history,
+    };
 
     try {
-      if (this.isProductQuery(message)) {
-        // ── Phase 1: Extract requirements ────────────────────────────────
-        const requirements = await this.extractRequirements(message);
-        this.logger.debug(`Extracted requirements: ${JSON.stringify(requirements)}`);
+      // ── Step 1: Route ──────────────────────────────────────────────────────
+      this.logger.debug(`[Pipeline] Step 1 — RouterAgent`);
+      context = await this.routerAgent.run(context);
+      this.logger.debug(`[Pipeline] Intent: ${context.intent}`);
 
-        // ── Phase 2: Deterministic DB search (AI never touches the DB) ───
-        const searchResults = await this.searchService.searchProducts({
-          query: (requirements.query as string) ?? message,
-          minPrice: requirements.minPrice as number | undefined,
-          maxPrice: requirements.maxPrice as number | undefined,
-          limit: 10,
-        });
-        this.logger.debug(`Search returned ${searchResults.total} products`);
+      // ── Step 2: Agent-specific pipeline ───────────────────────────────────
+      switch (context.intent) {
+        case 'PRODUCT_SEARCH':
+        case 'PRODUCT_DETAILS':
+          this.logger.debug(`[Pipeline] Step 2 — SearchAgent`);
+          context = await this.searchAgent.run(context);
 
-        if (searchResults.items.length === 0) {
-          // No results — ask AI to respond gracefully
-          const noResultPrompt = `You are SmartShop AI. A user searched for "${message}" but we found no matching products in our catalog. Politely inform them and suggest they broaden their search or adjust their budget. Keep it brief and helpful. Return plain text only.`;
-          const noResultResponse = await this.callAI(
-            [{ role: 'user', content: noResultPrompt }],
-            undefined,
-            512,
-          );
-          finalResponse = noResultResponse.content ?? 'No products found matching your criteria. Try adjusting your budget or search terms.';
-          structuredData = { intent: 'PRODUCT_SEARCH', products: [], followUpQuestions: [] };
-        } else {
-          // ── Phase 3: AI writes recommendation TEXT only ───────────────
-          // The products array is built deterministically — NOT by the AI
-          const textPrompt = this.buildTextOnlyPrompt(message, history, searchResults, requirements);
-          const aiResponse = await this.callAI(
-            [{ role: 'user', content: textPrompt }],
-            undefined,
-            2048,
-          );
+          this.logger.debug(`[Pipeline] Step 3 — RankingAgent`);
+          context = await this.rankingAgent.run(context);
+          break;
 
-          finalResponse = aiResponse.content ?? '';
+        case 'PRODUCT_COMPARE':
+          this.logger.debug(`[Pipeline] Step 2 — CompareAgent`);
+          context = await this.compareAgent.run(context);
 
-          // ── Build products array deterministically from search results ─
-          type PrismaProduct = { id: string; name: string; price: number; [key: string]: unknown };
-          const maxPrice = requirements.maxPrice as number | undefined;
+          // CompareAgent may fall back to PRODUCT_SEARCH if names not found
+          if (context.intent === 'PRODUCT_SEARCH') {
+            this.logger.debug(`[Pipeline] Compare fallback → SearchAgent`);
+            context = await this.searchAgent.run(context);
+            context = await this.rankingAgent.run(context);
+          }
+          break;
 
-          const rankedProducts = (searchResults.items as PrismaProduct[])
-            .filter((p) => !maxPrice || p.price <= maxPrice)
-            .map((p, idx) => ({
-              productId: p.id,
-              score: Math.max(95 - idx * 5, 60),
-              reason: `${p.name} matches your requirements`,
-              matchedRequirements: [
-                ...(maxPrice ? ['budget'] : []),
-                'specifications',
-              ],
-              warnings: [] as string[],
-            }));
-
-          structuredData = {
-            intent: 'PRODUCT_RECOMMENDATION',
-            products: rankedProducts,
-            followUpQuestions: [],
-          };
-        }
-      } else {
-        // General conversation
-        const aiResponse = await this.callAI(
-          [...history, { role: 'user', content: message }],
-          this.buildChatSystemPrompt(),
-          1024,
-        );
-        finalResponse = aiResponse.content ?? '';
+        case 'GENERAL':
+        case 'WISHLIST':
+        case 'RECOMMENDATIONS':
+          // No search needed — ResponseAgent handles these directly
+          break;
       }
+
+      // ── Step 3: Generate response ──────────────────────────────────────────
+      this.logger.debug(`[Pipeline] Step 4 — ResponseAgent`);
+      context = await this.responseAgent.run(context);
+
+      // ── Step 4: Persist top recommendations to DB ──────────────────────────
+      if (context.rankedProducts?.length) {
+        await this.persistRecommendations(
+          userId,
+          conversation.id,
+          context.rankedProducts,
+        ).catch((err) =>
+          this.logger.warn(`Failed to persist recommendations: ${(err as Error).message}`),
+        );
+      }
+
     } catch (err) {
       if (err instanceof HttpException) throw err;
-      const errorMsg = (err as Error).message ?? 'Unknown error';
-      this.logger.error(`AI processing failed: ${errorMsg}`, (err as Error).stack);
-      finalResponse = 'Sorry, I encountered an issue. Please try again.';
+      const msg = (err as Error).message ?? 'Unknown error';
+      this.logger.error(`Pipeline failed: ${msg}`, (err as Error).stack);
+      context.finalMessage = 'Sorry, something went wrong. Please try again.';
+      context.rankedProducts = [];
+      context.followUpQuestions = [];
     }
 
-    // Strip any accidental JSON wrapping from AI text response
-    try {
-      const cleaned = finalResponse
-        .replace(/^```json\s*/im, '')
-        .replace(/^```\s*/im, '')
-        .replace(/```\s*$/im, '')
-        .trim();
-      if (cleaned.startsWith('{')) {
-        const parsed = JSON.parse(cleaned) as Record<string, unknown>;
-        // Only use message field if AI returned JSON — ignore its products array
-        if (parsed.message) finalResponse = parsed.message as string;
-      }
-    } catch {
-      // Plain text — use as-is
-    }
-
+    // ── Persist conversation messages ────────────────────────────────────────
     await this.conversationsService.addMessage(conversation.id, 'user', message);
-    await this.conversationsService.addMessage(conversation.id, 'assistant', finalResponse);
+    await this.conversationsService.addMessage(
+      conversation.id,
+      'assistant',
+      context.finalMessage ?? '',
+    );
 
+    // ── Build API response ───────────────────────────────────────────────────
     return {
       conversationId: conversation.id,
-      message: finalResponse,
-      intent: (structuredData.intent as string) ?? 'GENERAL',
-      products: (structuredData.products as unknown[]) ?? [],
-      followUpQuestions: (structuredData.followUpQuestions as string[]) ?? [],
+      message: context.finalMessage ?? '',
+      intent: context.intent ?? 'GENERAL',
+      products: (context.rankedProducts ?? []).map((p) => ({
+        productId: p.productId,
+        score: p.score,
+        reason: p.matchedRequirements.length
+          ? `Matches: ${p.matchedRequirements.join(', ')}`
+          : `${p.name} is a great match`,
+        matchedRequirements: p.matchedRequirements,
+        warnings: p.warnings,
+      })),
+      followUpQuestions: context.followUpQuestions ?? [],
     };
   }
 
-  // ── Private helpers ────────────────────────────────────────────────────────
+  // ─── Helpers ───────────────────────────────────────────────────────────────
 
-  private async extractRequirements(message: string): Promise<Record<string, unknown>> {
-    const prompt = `Extract shopping requirements from this message and return ONLY a JSON object.
-
-Message: "${message}"
-
-JSON fields to extract (only include what is mentioned):
-- "query": string — product type + key specs as search keywords (e.g. "laptop", "smartphone camera")
-- "maxPrice": number — maximum budget in INR (e.g. 80000)
-- "minPrice": number — minimum price in INR if mentioned
-
-Examples:
-"I need laptop under 80k" → {"query":"laptop","maxPrice":80000}
-"best phone under 40000 with good camera" → {"query":"smartphone","maxPrice":40000}
-"headphones above 2000 under 5000" → {"query":"headphones","minPrice":2000,"maxPrice":5000}
-
-Return ONLY the JSON, nothing else.`;
-
-    try {
-      const response = await this.callAI([{ role: 'user', content: prompt }], undefined, 256);
-      const raw = (response.content ?? '').replace(/```json?\s*/gi, '').replace(/```/g, '').trim();
-      if (raw.startsWith('{')) {
-        return JSON.parse(raw) as Record<string, unknown>;
-      }
-    } catch (e) {
-      this.logger.warn(`Requirement extraction failed: ${(e as Error).message}`);
-    }
-    return { query: message };
-  }
-
-  private buildTextOnlyPrompt(
-    userMessage: string,
-    history: ChatMessage[],
-    searchResults: { items: unknown[]; total: number },
-    requirements: Record<string, unknown>,
-  ): string {
-    const historyText = history.length > 0
-      ? `Previous conversation:\n${history.slice(-4).map((m) => `${m.role}: ${m.content}`).join('\n')}\n\n`
-      : '';
-
-    type PrismaProduct = {
-      id: string;
-      name: string;
-      price: number;
-      originalPrice?: number | null;
-      rating?: number;
-      description?: string;
-      specifications?: unknown;
-      brand?: { name: string };
-    };
-
-    const productList = (searchResults.items as PrismaProduct[])
-      .map((p, i) =>
-        `${i + 1}. ${p.name} by ${p.brand?.name ?? 'Unknown'} — ₹${p.price.toLocaleString('en-IN')}` +
-        ` (Rating: ${p.rating ?? 'N/A'}/5)\n   ${(p.description ?? '').slice(0, 150)}`,
-      )
-      .join('\n\n');
-
-    return `${historyText}You are SmartShop AI, a helpful shopping assistant for an Indian e-commerce platform.
-
-User asked: "${userMessage}"
-${requirements.maxPrice ? `Budget: under ₹${(requirements.maxPrice as number).toLocaleString('en-IN')}` : ''}
-
-Here are the matching products from our catalog:
-
-${productList}
-
-Write a helpful, conversational recommendation that:
-1. Mentions ALL ${searchResults.items.length} products by name with their price
-2. Explains what each is good for based on its specs/description
-3. Suggests which is best overall for the user's needs
-4. Is friendly and easy to read
-
-Write in plain text — no JSON, no markdown headers. Just helpful paragraphs.`;
-  }
-
-  private buildRecommendationPrompt(
-    userMessage: string,
-    history: ChatMessage[],
-    searchResults: { items: unknown[]; total: number },
-    requirements: Record<string, unknown>,
-  ): string {
-    return this.buildTextOnlyPrompt(userMessage, history, searchResults, requirements);
-  }
-
-  private buildChatSystemPrompt(): string {
-    return `You are SmartShop AI, a helpful shopping assistant for an Indian e-commerce platform.
-Answer questions helpfully and concisely.
-If asked about products, ask for budget and requirements so you can search the catalog.`;
-  }
-
-  private async callAI(
-    messages: ChatMessage[],
-    systemPrompt?: string,
-    maxTokens = 2048,
+  private async persistRecommendations(
+    userId: string,
+    conversationId: string,
+    rankedProducts: AgentContext['rankedProducts'],
   ) {
-    return this.aiProvider
-      .generate({ messages, systemPrompt, temperature: 0.3, maxTokens })
-      .catch((err: Error) => {
-        if (err.message?.includes('429') || err.message?.includes('Too Many Requests')) {
-          throw new HttpException(
-            'The AI is rate limited. Please wait a moment and try again.',
-            HttpStatus.TOO_MANY_REQUESTS,
-          );
-        }
-        throw err;
-      });
-  }
+    if (!rankedProducts?.length) return;
 
-  private isProductQuery(message: string): boolean {
-    const keywords = [
-      'need', 'want', 'buy', 'looking for', 'recommend', 'suggest', 'find',
-      'laptop', 'phone', 'mobile', 'headphone', 'tablet', 'camera', 'tv',
-      'under', 'above', 'budget', '₹', 'rs', 'rupee', 'cheap', 'best', 'good',
-      'compare', 'difference', 'vs', 'which is better', 'show me',
-    ];
-    const lower = message.toLowerCase();
-    return keywords.some((k) => lower.includes(k));
+    // Save top 5 recommendations to DB
+    const top5 = rankedProducts.slice(0, 5);
+    await Promise.all(
+      top5.map((p) =>
+        this.recommendationsService.saveRecommendation(
+          userId,
+          p.productId,
+          p.score,
+          p.matchedRequirements.length
+            ? `Matches: ${p.matchedRequirements.join(', ')}`
+            : `Top match for your search`,
+          p.matchedRequirements,
+          conversationId,
+        ),
+      ),
+    );
   }
 }

@@ -9,8 +9,14 @@ export declare class AiService {
     chat(userId: string, dto: ChatRequestDto): Promise<{
         conversationId: string;
         message: string;
-        intent: string;
-        products: unknown[];
+        intent: import("./agents/agent.types").AgentIntent;
+        products: {
+            productId: string;
+            score: number;
+            reason: string;
+            matchedRequirements: string[];
+            warnings: string[];
+        }[];
         followUpQuestions: string[];
     }>;
 }

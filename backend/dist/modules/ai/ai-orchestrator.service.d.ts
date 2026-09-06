@@ -1,26 +1,33 @@
-import { IAIProvider } from './interfaces/ai-provider.interface';
 import { ChatRequestDto } from './dto/chat-request.dto';
-import { ToolDispatcherService } from './tools/tool-dispatcher.service';
 import { ConversationsService } from '../conversations/conversations.service';
-import { SearchService } from '../search/search.service';
+import { RecommendationsService } from '../recommendations/recommendations.service';
+import { RouterAgent } from './agents/router.agent';
+import { SearchAgent } from './agents/search.agent';
+import { CompareAgent } from './agents/compare.agent';
+import { RankingAgent } from './agents/ranking.agent';
+import { ResponseAgent } from './agents/response.agent';
 export declare class AiOrchestratorService {
-    private readonly aiProvider;
-    private readonly toolDispatcher;
     private readonly conversationsService;
-    private readonly searchService;
+    private readonly recommendationsService;
+    private readonly routerAgent;
+    private readonly searchAgent;
+    private readonly compareAgent;
+    private readonly rankingAgent;
+    private readonly responseAgent;
     private readonly logger;
-    constructor(aiProvider: IAIProvider, toolDispatcher: ToolDispatcherService, conversationsService: ConversationsService, searchService: SearchService);
+    constructor(conversationsService: ConversationsService, recommendationsService: RecommendationsService, routerAgent: RouterAgent, searchAgent: SearchAgent, compareAgent: CompareAgent, rankingAgent: RankingAgent, responseAgent: ResponseAgent);
     processMessage(userId: string, dto: ChatRequestDto): Promise<{
         conversationId: string;
         message: string;
-        intent: string;
-        products: unknown[];
+        intent: import("./agents/agent.types").AgentIntent;
+        products: {
+            productId: string;
+            score: number;
+            reason: string;
+            matchedRequirements: string[];
+            warnings: string[];
+        }[];
         followUpQuestions: string[];
     }>;
-    private extractRequirements;
-    private buildTextOnlyPrompt;
-    private buildRecommendationPrompt;
-    private buildChatSystemPrompt;
-    private callAI;
-    private isProductQuery;
+    private persistRecommendations;
 }
