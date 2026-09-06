@@ -16,16 +16,16 @@ exports.AiOrchestratorService = void 0;
 const common_1 = require("@nestjs/common");
 const ai_provider_interface_1 = require("./interfaces/ai-provider.interface");
 const logger_service_1 = require("../../common/logger/logger.service");
-const tool_definitions_1 = require("./tools/tool-definitions");
 const tool_dispatcher_service_1 = require("./tools/tool-dispatcher.service");
 const conversations_service_1 = require("../conversations/conversations.service");
+const search_service_1 = require("../search/search.service");
 let AiOrchestratorService = class AiOrchestratorService {
-    constructor(aiProvider, toolDispatcher, conversationsService) {
+    constructor(aiProvider, toolDispatcher, conversationsService, searchService) {
         this.aiProvider = aiProvider;
         this.toolDispatcher = toolDispatcher;
         this.conversationsService = conversationsService;
+        this.searchService = searchService;
         this.logger = new logger_service_1.AppLogger('AiOrchestrator');
-        this.MAX_TOOL_ROUNDS = 3;
     }
     async processMessage(userId, dto) {
         const { message, conversationId } = dto;
@@ -36,39 +36,54 @@ let AiOrchestratorService = class AiOrchestratorService {
             role: m.role,
             content: m.content,
         }));
-        history.push({ role: 'user', content: message });
-        const systemPrompt = this.buildSystemPrompt();
-        const messages = [...history];
         let finalResponse = '';
         let structuredData = {};
         try {
-            const firstResponse = await this.callAI(messages, systemPrompt, true);
-            if (firstResponse.toolCalls.length > 0) {
-                const toolResults = [];
-                for (const toolCall of firstResponse.toolCalls) {
-                    this.logger.debug(`Tool: ${toolCall.name}(${JSON.stringify(toolCall.arguments)})`);
-                    try {
-                        const result = await this.toolDispatcher.dispatch(userId, toolCall);
-                        toolResults.push(`${toolCall.name} results: ${JSON.stringify(result)}`);
-                    }
-                    catch (err) {
-                        this.logger.warn(`Tool ${toolCall.name} failed: ${err.message}`);
-                        toolResults.push(`${toolCall.name} failed: no results found`);
+            const extractionPrompt = this.buildExtractionPrompt(message);
+            const extractionResponse = await this.callAI([{ role: 'user', content: extractionPrompt }], undefined);
+            let requirements = {};
+            const isProductQuery = this.isProductQuery(message);
+            if (isProductQuery) {
+                try {
+                    const cleaned = (extractionResponse.content ?? '')
+                        .replace(/^```json\s*/im, '')
+                        .replace(/^```\s*/im, '')
+                        .replace(/```\s*$/im, '')
+                        .trim();
+                    if (cleaned.startsWith('{')) {
+                        requirements = JSON.parse(cleaned);
                     }
                 }
-                const contextMessage = `Here are the search results from the database:\n\n${toolResults.join('\n\n')}\n\nNow provide your recommendation based on these real results.`;
-                messages.push({ role: 'user', content: contextMessage });
-                const secondResponse = await this.callAI(messages, systemPrompt, false);
-                finalResponse = secondResponse.content ?? '';
+                catch {
+                    this.logger.warn('Could not parse requirements — using keyword search');
+                    requirements = { query: message };
+                }
+                const searchResults = await this.searchService.searchProducts({
+                    query: requirements.query ?? message,
+                    categoryId: requirements.categoryId,
+                    brandId: requirements.brandId,
+                    minPrice: requirements.minPrice,
+                    maxPrice: requirements.maxPrice,
+                    limit: 8,
+                });
+                this.logger.debug(`Search returned ${searchResults.total} products`);
+                const recommendationPrompt = this.buildRecommendationPrompt(message, history, searchResults, requirements);
+                const recommendationResponse = await this.callAI([{ role: 'user', content: recommendationPrompt }], undefined);
+                finalResponse = recommendationResponse.content ?? '';
             }
             else {
-                finalResponse = firstResponse.content ?? '';
+                const chatMessages = [
+                    ...history,
+                    { role: 'user', content: message },
+                ];
+                const chatResponse = await this.callAI(chatMessages, this.buildChatSystemPrompt());
+                finalResponse = chatResponse.content ?? '';
             }
         }
         catch (err) {
             if (err instanceof common_1.HttpException)
                 throw err;
-            this.logger.error(`AI processing failed: ${err.message}`);
+            this.logger.error(`AI processing failed: ${err.message}`, err.stack);
             finalResponse = 'I encountered an issue processing your request. Please try again.';
         }
         try {
@@ -95,71 +110,88 @@ let AiOrchestratorService = class AiOrchestratorService {
             followUpQuestions: structuredData.followUpQuestions ?? [],
         };
     }
-    async callAI(messages, systemPrompt, withTools) {
+    async callAI(messages, systemPrompt) {
         return this.aiProvider
-            .generate({
-            messages,
-            tools: withTools ? tool_definitions_1.AI_TOOLS : undefined,
-            systemPrompt,
-            temperature: 0.4,
-            maxTokens: 4096,
-        })
+            .generate({ messages, systemPrompt, temperature: 0.4, maxTokens: 2048 })
             .catch((err) => {
             if (err.message?.includes('429') || err.message?.includes('Too Many Requests')) {
-                throw new common_1.HttpException('The AI is temporarily rate limited. Please wait a moment and try again.', common_1.HttpStatus.TOO_MANY_REQUESTS);
-            }
-            if (err.message?.includes('tool call validation') ||
-                err.message?.includes('400') ||
-                err.message?.includes('tool_use_failed')) {
-                this.logger.warn('Tool validation error — retrying without tools');
-                return this.aiProvider.generate({
-                    messages,
-                    systemPrompt,
-                    temperature: 0.4,
-                    maxTokens: 4096,
-                });
+                throw new common_1.HttpException('The AI is rate limited. Please wait a moment and try again.', common_1.HttpStatus.TOO_MANY_REQUESTS);
             }
             throw err;
         });
     }
-    buildSystemPrompt() {
-        return `You are SmartShop AI, a helpful shopping assistant for an Indian e-commerce platform.
+    isProductQuery(message) {
+        const keywords = [
+            'need', 'want', 'buy', 'looking for', 'recommend', 'suggest', 'find',
+            'laptop', 'phone', 'mobile', 'headphone', 'tablet', 'camera', 'tv',
+            'under', 'budget', '₹', 'rs', 'rupee', 'cheap', 'best', 'good',
+            'compare', 'difference', 'vs', 'which is better',
+        ];
+        const lower = message.toLowerCase();
+        return keywords.some((k) => lower.includes(k));
+    }
+    buildExtractionPrompt(message) {
+        return `Extract shopping requirements from this user message and return ONLY valid JSON.
 
-Your job:
-1. Understand what the user wants to buy
-2. Use the searchProducts tool to find matching products from the database
-3. Recommend the best options with clear explanations
+User message: "${message}"
 
-IMPORTANT RULES:
-- Always use searchProducts to find real products before recommending
-- Never invent product names, prices, or specifications  
-- Prices are in Indian Rupees (₹)
-- If the user says hello or asks a general question, respond conversationally without searching
-- Keep responses clear and helpful
-
-When you have search results, respond in this JSON format:
+Return JSON with these fields (omit fields that are not mentioned):
 {
-  "message": "Your helpful recommendation message here",
+  "query": "keyword search terms",
+  "categoryId": "one of: laptops, smartphones, tablets, monitors, headphones, cameras, televisions",
+  "brandId": "brand name if mentioned",
+  "minPrice": number or null,
+  "maxPrice": number or null,
+  "minRam": number in GB or null,
+  "minStorage": number in GB or null,
+  "useCase": "description of intended use"
+}
+
+Return ONLY the JSON object, no explanation.`;
+    }
+    buildRecommendationPrompt(userMessage, history, searchResults, requirements) {
+        const historyText = history.length > 0
+            ? `\nConversation history:\n${history.map((m) => `${m.role}: ${m.content}`).join('\n')}\n`
+            : '';
+        const productsText = searchResults.items.length > 0
+            ? JSON.stringify(searchResults.items, null, 2)
+            : 'No products found matching the criteria.';
+        return `You are SmartShop AI, a helpful shopping assistant for an Indian e-commerce platform.
+${historyText}
+User asked: "${userMessage}"
+
+Extracted requirements: ${JSON.stringify(requirements)}
+
+Real products from our database:
+${productsText}
+
+Based ONLY on the products above, provide helpful recommendations. 
+- Never invent products or specifications not shown above
+- Mention actual product names, prices, and specs from the data
+- If no products match, explain why and suggest adjusting the budget or requirements
+- Keep response conversational and helpful
+
+Respond in this JSON format:
+{
+  "message": "Your helpful recommendation (2-3 paragraphs)",
   "intent": "PRODUCT_RECOMMENDATION",
   "products": [
     {
-      "productId": "the actual product id from search results",
+      "productId": "actual id from the products list",
       "score": 85,
-      "reason": "Why this product is a good match",
-      "matchedRequirements": ["budget", "RAM", "use case"],
+      "reason": "Why this matches their needs",
+      "matchedRequirements": ["budget", "use case"],
       "warnings": []
     }
   ],
   "followUpQuestions": ["Any clarifying questions if needed"]
-}
-
-For greetings or general questions, respond with:
-{
-  "message": "Your conversational response",
-  "intent": "GENERAL",
-  "products": [],
-  "followUpQuestions": []
 }`;
+    }
+    buildChatSystemPrompt() {
+        return `You are SmartShop AI, a friendly shopping assistant for an Indian e-commerce platform.
+Help users find the best products for their needs.
+Keep responses concise and helpful.
+If the user asks about products, ask them about their budget and requirements.`;
     }
 };
 exports.AiOrchestratorService = AiOrchestratorService;
@@ -167,6 +199,7 @@ exports.AiOrchestratorService = AiOrchestratorService = __decorate([
     (0, common_1.Injectable)(),
     __param(0, (0, common_1.Inject)(ai_provider_interface_1.AI_PROVIDER)),
     __metadata("design:paramtypes", [Object, tool_dispatcher_service_1.ToolDispatcherService,
-        conversations_service_1.ConversationsService])
+        conversations_service_1.ConversationsService,
+        search_service_1.SearchService])
 ], AiOrchestratorService);
 //# sourceMappingURL=ai-orchestrator.service.js.map

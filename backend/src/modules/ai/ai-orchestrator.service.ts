@@ -2,19 +2,29 @@ import { Inject, Injectable, HttpException, HttpStatus } from '@nestjs/common';
 import { AI_PROVIDER, IAIProvider, ChatMessage } from './interfaces/ai-provider.interface';
 import { AppLogger } from '../../common/logger/logger.service';
 import { ChatRequestDto } from './dto/chat-request.dto';
-import { AI_TOOLS } from './tools/tool-definitions';
 import { ToolDispatcherService } from './tools/tool-dispatcher.service';
 import { ConversationsService } from '../conversations/conversations.service';
+import { SearchService } from '../search/search.service';
 
+/**
+ * AiOrchestratorService — Two-phase pipeline:
+ *
+ * Phase 1: Use AI to extract structured requirements from user message (no tools)
+ * Phase 2: Run deterministic search using extracted requirements
+ * Phase 3: Use AI to generate a helpful recommendation from the real search results
+ *
+ * This approach avoids tool-calling entirely, which is unreliable on free-tier models.
+ * The AI never touches the database — only the SearchService does.
+ */
 @Injectable()
 export class AiOrchestratorService {
   private readonly logger = new AppLogger('AiOrchestrator');
-  private readonly MAX_TOOL_ROUNDS = 3;
 
   constructor(
     @Inject(AI_PROVIDER) private readonly aiProvider: IAIProvider,
     private readonly toolDispatcher: ToolDispatcherService,
     private readonly conversationsService: ConversationsService,
+    private readonly searchService: SearchService,
   ) {}
 
   async processMessage(userId: string, dto: ChatRequestDto) {
@@ -31,51 +41,77 @@ export class AiOrchestratorService {
       content: m.content,
     }));
 
-    // Add the new user message
-    history.push({ role: 'user', content: message });
-
-    const systemPrompt = this.buildSystemPrompt();
-    const messages: ChatMessage[] = [...history];
     let finalResponse = '';
     let structuredData: Record<string, unknown> = {};
 
     try {
-      // Phase 1 — Call AI with tools to get search intent
-      const firstResponse = await this.callAI(messages, systemPrompt, true);
+      // ── Phase 1: Extract requirements ──────────────────────────────
+      const extractionPrompt = this.buildExtractionPrompt(message);
+      const extractionResponse = await this.callAI(
+        [{ role: 'user', content: extractionPrompt }],
+        undefined,
+      );
 
-      if (firstResponse.toolCalls.length > 0) {
-        // AI wants to search — dispatch all tool calls
-        const toolResults: string[] = [];
+      let requirements: Record<string, unknown> = {};
+      const isProductQuery = this.isProductQuery(message);
 
-        for (const toolCall of firstResponse.toolCalls) {
-          this.logger.debug(`Tool: ${toolCall.name}(${JSON.stringify(toolCall.arguments)})`);
-          try {
-            const result = await this.toolDispatcher.dispatch(userId, toolCall);
-            toolResults.push(`${toolCall.name} results: ${JSON.stringify(result)}`);
-          } catch (err) {
-            this.logger.warn(`Tool ${toolCall.name} failed: ${(err as Error).message}`);
-            toolResults.push(`${toolCall.name} failed: no results found`);
+      if (isProductQuery) {
+        try {
+          const cleaned = (extractionResponse.content ?? '')
+            .replace(/^```json\s*/im, '')
+            .replace(/^```\s*/im, '')
+            .replace(/```\s*$/im, '')
+            .trim();
+          if (cleaned.startsWith('{')) {
+            requirements = JSON.parse(cleaned) as Record<string, unknown>;
           }
+        } catch {
+          this.logger.warn('Could not parse requirements — using keyword search');
+          requirements = { query: message };
         }
 
-        // Phase 2 — Call AI again with tool results to generate final recommendation
-        const contextMessage = `Here are the search results from the database:\n\n${toolResults.join('\n\n')}\n\nNow provide your recommendation based on these real results.`;
+        // ── Phase 2: Deterministic search ──────────────────────────
+        const searchResults = await this.searchService.searchProducts({
+          query: (requirements.query as string) ?? message,
+          categoryId: requirements.categoryId as string | undefined,
+          brandId: requirements.brandId as string | undefined,
+          minPrice: requirements.minPrice as number | undefined,
+          maxPrice: requirements.maxPrice as number | undefined,
+          limit: 8,
+        });
 
-        messages.push({ role: 'user', content: contextMessage });
+        this.logger.debug(`Search returned ${searchResults.total} products`);
 
-        const secondResponse = await this.callAI(messages, systemPrompt, false);
-        finalResponse = secondResponse.content ?? '';
+        // ── Phase 3: Generate recommendation ───────────────────────
+        const recommendationPrompt = this.buildRecommendationPrompt(
+          message,
+          history,
+          searchResults,
+          requirements,
+        );
+
+        const recommendationResponse = await this.callAI(
+          [{ role: 'user', content: recommendationPrompt }],
+          undefined,
+        );
+
+        finalResponse = recommendationResponse.content ?? '';
       } else {
-        // No tools needed — direct response (greetings, clarifications, etc.)
-        finalResponse = firstResponse.content ?? '';
+        // General conversation — no search needed
+        const chatMessages: ChatMessage[] = [
+          ...history,
+          { role: 'user', content: message },
+        ];
+        const chatResponse = await this.callAI(chatMessages, this.buildChatSystemPrompt());
+        finalResponse = chatResponse.content ?? '';
       }
     } catch (err) {
       if (err instanceof HttpException) throw err;
-      this.logger.error(`AI processing failed: ${(err as Error).message}`);
+      this.logger.error(`AI processing failed: ${(err as Error).message}`, (err as Error).stack);
       finalResponse = 'I encountered an issue processing your request. Please try again.';
     }
 
-    // Parse structured JSON if AI returned it
+    // Parse structured JSON if present
     try {
       const cleaned = finalResponse
         .replace(/^```json\s*/im, '')
@@ -89,10 +125,10 @@ export class AiOrchestratorService {
         structuredData = parsed;
       }
     } catch {
-      // Plain text response — use as-is
+      // Plain text — use as-is
     }
 
-    // Persist the exchange
+    // Persist
     await this.conversationsService.addMessage(conversation.id, 'user', message);
     await this.conversationsService.addMessage(conversation.id, 'assistant', finalResponse);
 
@@ -105,81 +141,102 @@ export class AiOrchestratorService {
     };
   }
 
-  private async callAI(
-    messages: ChatMessage[],
-    systemPrompt: string,
-    withTools: boolean,
-  ) {
+  private async callAI(messages: ChatMessage[], systemPrompt?: string) {
     return this.aiProvider
-      .generate({
-        messages,
-        tools: withTools ? AI_TOOLS : undefined,
-        systemPrompt,
-        temperature: 0.4,
-        maxTokens: 4096,
-      })
+      .generate({ messages, systemPrompt, temperature: 0.4, maxTokens: 2048 })
       .catch((err: Error) => {
         if (err.message?.includes('429') || err.message?.includes('Too Many Requests')) {
           throw new HttpException(
-            'The AI is temporarily rate limited. Please wait a moment and try again.',
+            'The AI is rate limited. Please wait a moment and try again.',
             HttpStatus.TOO_MANY_REQUESTS,
           );
-        }
-        // Tool validation failed — retry without tools
-        if (
-          err.message?.includes('tool call validation') ||
-          err.message?.includes('400') ||
-          err.message?.includes('tool_use_failed')
-        ) {
-          this.logger.warn('Tool validation error — retrying without tools');
-          return this.aiProvider.generate({
-            messages,
-            systemPrompt,
-            temperature: 0.4,
-            maxTokens: 4096,
-          });
         }
         throw err;
       });
   }
 
-  private buildSystemPrompt(): string {
-    return `You are SmartShop AI, a helpful shopping assistant for an Indian e-commerce platform.
+  /** Detect if this is a product search query or just conversation */
+  private isProductQuery(message: string): boolean {
+    const keywords = [
+      'need', 'want', 'buy', 'looking for', 'recommend', 'suggest', 'find',
+      'laptop', 'phone', 'mobile', 'headphone', 'tablet', 'camera', 'tv',
+      'under', 'budget', '₹', 'rs', 'rupee', 'cheap', 'best', 'good',
+      'compare', 'difference', 'vs', 'which is better',
+    ];
+    const lower = message.toLowerCase();
+    return keywords.some((k) => lower.includes(k));
+  }
 
-Your job:
-1. Understand what the user wants to buy
-2. Use the searchProducts tool to find matching products from the database
-3. Recommend the best options with clear explanations
+  private buildExtractionPrompt(message: string): string {
+    return `Extract shopping requirements from this user message and return ONLY valid JSON.
 
-IMPORTANT RULES:
-- Always use searchProducts to find real products before recommending
-- Never invent product names, prices, or specifications  
-- Prices are in Indian Rupees (₹)
-- If the user says hello or asks a general question, respond conversationally without searching
-- Keep responses clear and helpful
+User message: "${message}"
 
-When you have search results, respond in this JSON format:
+Return JSON with these fields (omit fields that are not mentioned):
 {
-  "message": "Your helpful recommendation message here",
+  "query": "keyword search terms",
+  "categoryId": "one of: laptops, smartphones, tablets, monitors, headphones, cameras, televisions",
+  "brandId": "brand name if mentioned",
+  "minPrice": number or null,
+  "maxPrice": number or null,
+  "minRam": number in GB or null,
+  "minStorage": number in GB or null,
+  "useCase": "description of intended use"
+}
+
+Return ONLY the JSON object, no explanation.`;
+  }
+
+  private buildRecommendationPrompt(
+    userMessage: string,
+    history: ChatMessage[],
+    searchResults: { items: unknown[]; total: number },
+    requirements: Record<string, unknown>,
+  ): string {
+    const historyText = history.length > 0
+      ? `\nConversation history:\n${history.map((m) => `${m.role}: ${m.content}`).join('\n')}\n`
+      : '';
+
+    const productsText = searchResults.items.length > 0
+      ? JSON.stringify(searchResults.items, null, 2)
+      : 'No products found matching the criteria.';
+
+    return `You are SmartShop AI, a helpful shopping assistant for an Indian e-commerce platform.
+${historyText}
+User asked: "${userMessage}"
+
+Extracted requirements: ${JSON.stringify(requirements)}
+
+Real products from our database:
+${productsText}
+
+Based ONLY on the products above, provide helpful recommendations. 
+- Never invent products or specifications not shown above
+- Mention actual product names, prices, and specs from the data
+- If no products match, explain why and suggest adjusting the budget or requirements
+- Keep response conversational and helpful
+
+Respond in this JSON format:
+{
+  "message": "Your helpful recommendation (2-3 paragraphs)",
   "intent": "PRODUCT_RECOMMENDATION",
   "products": [
     {
-      "productId": "the actual product id from search results",
+      "productId": "actual id from the products list",
       "score": 85,
-      "reason": "Why this product is a good match",
-      "matchedRequirements": ["budget", "RAM", "use case"],
+      "reason": "Why this matches their needs",
+      "matchedRequirements": ["budget", "use case"],
       "warnings": []
     }
   ],
   "followUpQuestions": ["Any clarifying questions if needed"]
-}
-
-For greetings or general questions, respond with:
-{
-  "message": "Your conversational response",
-  "intent": "GENERAL",
-  "products": [],
-  "followUpQuestions": []
 }`;
+  }
+
+  private buildChatSystemPrompt(): string {
+    return `You are SmartShop AI, a friendly shopping assistant for an Indian e-commerce platform.
+Help users find the best products for their needs.
+Keep responses concise and helpful.
+If the user asks about products, ask them about their budget and requirements.`;
   }
 }
