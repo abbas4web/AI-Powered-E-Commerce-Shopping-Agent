@@ -5,7 +5,9 @@ export declare class SearchService {
     private readonly prisma;
     private readonly logger;
     constructor(prisma: PrismaService);
-    searchProducts(dto: ProductSearchDto): Promise<import("../../common/dto/pagination.dto").PaginatedResult<{
+    searchProducts(dto: ProductSearchDto & {
+        categorySlug?: string;
+    }): Promise<import("../../common/dto/pagination.dto").PaginatedResult<{
         category: {
             name: string;
             id: string;
@@ -47,4 +49,5 @@ export declare class SearchService {
         categoryId: string;
         brandId: string;
     }>>;
+    detectCategorySlug(query: string): string | null;
 }

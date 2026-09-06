@@ -33,6 +33,12 @@ __decorate([
     __metadata("design:type", String)
 ], ProductSearchDto.prototype, "categoryId", void 0);
 __decorate([
+    (0, swagger_1.ApiPropertyOptional)({ description: 'Category slug (e.g. laptops, smartphones)' }),
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", String)
+], ProductSearchDto.prototype, "categorySlug", void 0);
+__decorate([
     (0, swagger_1.ApiPropertyOptional)(),
     (0, class_validator_1.IsOptional)(),
     (0, class_validator_1.IsString)(),

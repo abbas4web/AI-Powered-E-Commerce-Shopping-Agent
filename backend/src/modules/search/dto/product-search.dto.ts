@@ -13,6 +13,11 @@ export class ProductSearchDto {
   @IsString()
   categoryId?: string;
 
+  @ApiPropertyOptional({ description: 'Category slug (e.g. laptops, smartphones)' })
+  @IsOptional()
+  @IsString()
+  categorySlug?: string;
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()

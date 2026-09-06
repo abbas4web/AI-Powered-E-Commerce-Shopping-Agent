@@ -14,16 +14,36 @@ const common_1 = require("@nestjs/common");
 const prisma_service_1 = require("../../database/prisma.service");
 const logger_service_1 = require("../../common/logger/logger.service");
 const pagination_dto_1 = require("../../common/dto/pagination.dto");
+const CATEGORY_KEYWORDS = {
+    laptops: ['laptop', 'laptops', 'notebook', 'macbook', 'chromebook'],
+    smartphones: ['phone', 'mobile', 'smartphone', 'iphone', 'android'],
+    tablets: ['tablet', 'ipad'],
+    headphones: ['headphone', 'earphone', 'earbuds', 'headset', 'airpods'],
+    monitors: ['monitor', 'display', 'screen'],
+    cameras: ['camera', 'dslr', 'mirrorless'],
+    televisions: ['tv', 'television', 'smart tv'],
+};
 let SearchService = class SearchService {
     constructor(prisma) {
         this.prisma = prisma;
         this.logger = new logger_service_1.AppLogger('SearchService');
     }
     async searchProducts(dto) {
-        const { query, categoryId, brandId, minPrice, maxPrice, page = 1, limit = 20, } = dto;
+        const { query, categoryId, categorySlug, brandId, minPrice, maxPrice, page = 1, limit = 20, } = dto;
         const where = { isActive: true };
-        if (categoryId)
+        if (categoryId) {
             where.categoryId = categoryId;
+        }
+        else if (categorySlug) {
+            where.category = { slug: { equals: categorySlug, mode: 'insensitive' } };
+        }
+        else if (query) {
+            const detectedSlug = this.detectCategorySlug(query);
+            if (detectedSlug) {
+                where.category = { slug: detectedSlug };
+                this.logger.debug(`Auto-detected category: ${detectedSlug} from query: "${query}"`);
+            }
+        }
         if (brandId)
             where.brandId = brandId;
         if (minPrice !== undefined || maxPrice !== undefined) {
@@ -33,7 +53,7 @@ let SearchService = class SearchService {
             if (maxPrice !== undefined)
                 where.price.lte = maxPrice;
         }
-        if (query) {
+        if (query && !where.category) {
             where.OR = [
                 { name: { contains: query, mode: 'insensitive' } },
                 { description: { contains: query, mode: 'insensitive' } },
@@ -52,6 +72,15 @@ let SearchService = class SearchService {
         ]);
         this.logger.debug(`Search for "${query}" returned ${total} results`);
         return (0, pagination_dto_1.paginate)(products, total, page, limit);
+    }
+    detectCategorySlug(query) {
+        const lower = query.toLowerCase();
+        for (const [slug, keywords] of Object.entries(CATEGORY_KEYWORDS)) {
+            if (keywords.some((k) => lower.includes(k))) {
+                return slug;
+            }
+        }
+        return null;
     }
 };
 exports.SearchService = SearchService;
