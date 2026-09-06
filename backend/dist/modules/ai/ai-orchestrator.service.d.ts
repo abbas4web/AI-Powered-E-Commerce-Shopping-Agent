@@ -17,9 +17,9 @@ export declare class AiOrchestratorService {
         products: unknown[];
         followUpQuestions: string[];
     }>;
-    private callAI;
-    private isProductQuery;
-    private buildExtractionPrompt;
+    private extractRequirements;
     private buildRecommendationPrompt;
     private buildChatSystemPrompt;
+    private callAI;
+    private isProductQuery;
 }
