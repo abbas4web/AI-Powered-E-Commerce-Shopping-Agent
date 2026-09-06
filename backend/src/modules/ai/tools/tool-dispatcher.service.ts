@@ -23,9 +23,14 @@ export class ToolDispatcherService {
   ) {}
 
   async dispatch(userId: string, toolCall: AIToolCall): Promise<unknown> {
-    const { name, arguments: args } = toolCall;
+    const { name } = toolCall;
 
-    this.logger.debug(`Dispatching tool: ${name}`);
+    // Strip null/undefined values — some models send null for optional params
+    const args = Object.fromEntries(
+      Object.entries(toolCall.arguments).filter(([, v]) => v !== null && v !== undefined),
+    );
+
+    this.logger.debug(`Dispatching tool: ${name} with args: ${JSON.stringify(args)}`);
 
     switch (name) {
       case 'searchProducts':

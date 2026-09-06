@@ -63,10 +63,37 @@ export function ChatInterface() {
         setConversationId(response.conversationId);
       }
 
+      // The AI returns a JSON string inside response.message — parse it
+      let parsedResponse: ChatResponse = response;
+      let displayMessage = response.message;
+
+      try {
+        // Strip markdown code blocks if present
+        const cleaned = response.message
+          .replace(/^```json\s*/i, '')
+          .replace(/^```\s*/i, '')
+          .replace(/```$/i, '')
+          .trim();
+
+        if (cleaned.startsWith('{')) {
+          const parsed = JSON.parse(cleaned) as ChatResponse;
+          parsedResponse = {
+            ...response,
+            message: parsed.message ?? response.message,
+            intent: parsed.intent,
+            products: parsed.products,
+            followUpQuestions: parsed.followUpQuestions,
+          };
+          displayMessage = parsed.message ?? response.message;
+        }
+      } catch {
+        // Not JSON — display as plain text
+      }
+
       const assistantMessage: Message = {
         role: 'assistant',
-        content: response.message,
-        response,
+        content: displayMessage,
+        response: parsedResponse,
         timestamp: new Date().toISOString(),
       };
       setMessages((prev) => [...prev, assistantMessage]);

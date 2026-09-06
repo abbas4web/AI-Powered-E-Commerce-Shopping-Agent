@@ -71,6 +71,15 @@ export class AiOrchestratorService {
             HttpStatus.TOO_MANY_REQUESTS,
           );
         }
+        // Tool validation error — retry without tools
+        if (err.message?.includes('tool call validation failed') || err.message?.includes('400')) {
+          this.logger.warn('Tool validation failed, retrying without tools');
+          return this.aiProvider.generate({
+            messages,
+            systemPrompt,
+            temperature: 0.3,
+          });
+        }
         throw err;
       });
 

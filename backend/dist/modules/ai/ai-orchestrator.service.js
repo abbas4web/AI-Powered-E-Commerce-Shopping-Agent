@@ -52,6 +52,14 @@ let AiOrchestratorService = class AiOrchestratorService {
                 if (err.message?.includes('429') || err.message?.includes('Too Many Requests')) {
                     throw new common_1.HttpException('The AI service is rate limited. Please wait a moment and try again.', common_1.HttpStatus.TOO_MANY_REQUESTS);
                 }
+                if (err.message?.includes('tool call validation failed') || err.message?.includes('400')) {
+                    this.logger.warn('Tool validation failed, retrying without tools');
+                    return this.aiProvider.generate({
+                        messages,
+                        systemPrompt,
+                        temperature: 0.3,
+                    });
+                }
                 throw err;
             });
             if (response.finishReason === 'stop' || response.toolCalls.length === 0) {

@@ -21,8 +21,9 @@ let ToolDispatcherService = class ToolDispatcherService {
         this.logger = new logger_service_1.AppLogger('ToolDispatcher');
     }
     async dispatch(userId, toolCall) {
-        const { name, arguments: args } = toolCall;
-        this.logger.debug(`Dispatching tool: ${name}`);
+        const { name } = toolCall;
+        const args = Object.fromEntries(Object.entries(toolCall.arguments).filter(([, v]) => v !== null && v !== undefined));
+        this.logger.debug(`Dispatching tool: ${name} with args: ${JSON.stringify(args)}`);
         switch (name) {
             case 'searchProducts':
                 return this.handleSearchProducts(args);
