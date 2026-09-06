@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, HttpException, HttpStatus } from '@nestjs/common';
 import { AI_PROVIDER, IAIProvider, ChatMessage } from './interfaces/ai-provider.interface';
 import { AppLogger } from '../../common/logger/logger.service';
 import { ChatRequestDto } from './dto/chat-request.dto';
@@ -64,6 +64,14 @@ export class AiOrchestratorService {
         tools: AI_TOOLS,
         systemPrompt,
         temperature: 0.3,
+      }).catch((err: Error) => {
+        if (err.message?.includes('429') || err.message?.includes('Too Many Requests')) {
+          throw new HttpException(
+            'The AI service is rate limited. Please wait a moment and try again.',
+            HttpStatus.TOO_MANY_REQUESTS,
+          );
+        }
+        throw err;
       });
 
       if (response.finishReason === 'stop' || response.toolCalls.length === 0) {

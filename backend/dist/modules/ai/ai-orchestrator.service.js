@@ -48,6 +48,11 @@ let AiOrchestratorService = class AiOrchestratorService {
                 tools: tool_definitions_1.AI_TOOLS,
                 systemPrompt,
                 temperature: 0.3,
+            }).catch((err) => {
+                if (err.message?.includes('429') || err.message?.includes('Too Many Requests')) {
+                    throw new common_1.HttpException('The AI service is rate limited. Please wait a moment and try again.', common_1.HttpStatus.TOO_MANY_REQUESTS);
+                }
+                throw err;
             });
             if (response.finishReason === 'stop' || response.toolCalls.length === 0) {
                 finalResponse = response.content;
