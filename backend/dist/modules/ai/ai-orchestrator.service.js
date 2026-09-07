@@ -66,6 +66,7 @@ let AiOrchestratorService = class AiOrchestratorService {
                     break;
                 case 'FOLLOWUP_SEARCH': {
                     const needsNewSearch = this.followUpNeedsNewSearch(message);
+                    const isBestPick = this.isBestPickQuestion(message);
                     if (needsNewSearch) {
                         this.logger.debug(`[Pipeline] FOLLOWUP — re-search with refinement`);
                         context = await this.searchAgent.run(context);
@@ -75,7 +76,12 @@ let AiOrchestratorService = class AiOrchestratorService {
                     }
                     else {
                         this.logger.debug(`[Pipeline] FOLLOWUP — using previous results`);
+                        context.rankedProducts = previousSearchResults;
                         pipelineTrace.push(`FOLLOWUP → using ${previousSearchResults.length} previous results`);
+                    }
+                    if (isBestPick) {
+                        context.bestPickOnly = true;
+                        pipelineTrace.push(`FOLLOWUP → bestPickOnly flag set`);
                     }
                     break;
                 }
@@ -153,6 +159,18 @@ let AiOrchestratorService = class AiOrchestratorService {
             /\b(add|include)\s+\w+\s+brand/,
         ];
         return needsNewSearch.some((p) => p.test(lower));
+    }
+    isBestPickQuestion(message) {
+        const lower = message.toLowerCase().trim();
+        const bestPickPatterns = [
+            /which.*(best|top|recommended|should i (buy|get|pick|choose))/,
+            /what.*(best|top|recommended|should i (buy|get|pick|choose))/,
+            /^(best one|top one|recommend (one|me one|the best))/,
+            /which (one|laptop|phone|product).*(buy|get|pick|take|prefer|go (for|with))/,
+            /^(which (should|would) (i|you))/,
+            /(recommend|suggest) (one|the best)/,
+        ];
+        return bestPickPatterns.some((p) => p.test(lower));
     }
     async persistRecommendations(userId, conversationId, rankedProducts) {
         const top5 = rankedProducts.slice(0, 5);

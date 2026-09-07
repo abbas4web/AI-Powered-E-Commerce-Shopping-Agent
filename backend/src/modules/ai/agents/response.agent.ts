@@ -116,7 +116,8 @@ Answer the follow-up question based on the products above.
 - If asked to filter (e.g. "only ASUS") → mention only matching products
 - If asked to sort → list them in the requested order
 - Be specific: mention product names, prices, specs
-- Be concise and conversational
+- Be concise and conversational (under 150 words)
+- Plain text ONLY — no **bold**, no | tables |, no markdown of any kind
 - Do NOT search for new products — answer using only the products listed above`;
 
     try {
@@ -134,6 +135,11 @@ Answer the follow-up question based on the products above.
     // Keep showing previous products in the UI
     if (!rankedProducts?.length && previousSearchResults?.length) {
       context.rankedProducts = previousSearchResults;
+    }
+
+    // "Which is best?" — trim down to just the top-scored card so UI shows one product
+    if (context.bestPickOnly && context.rankedProducts?.length) {
+      context.rankedProducts = context.rankedProducts.slice(0, 1);
     }
 
     context.followUpQuestions = [];
@@ -189,7 +195,7 @@ Write a comparison response that:
 3. Gives a clear final recommendation
 4. Is conversational and easy to read (under 200 words)
 
-Plain text only. No JSON.`;
+Plain text ONLY — no **bold**, no | tables |, no markdown. Natural sentences only.`;
 
     try {
       const response = await this.aiProvider.generate({
@@ -311,7 +317,11 @@ Write a helpful, natural response that:
 4. Mentions key specs relevant to the user's use case
 5. Is friendly and conversational (under 200 words)
 
-Plain text only. No JSON. No markdown headers. No bullet dashes.`;
+STRICT FORMATTING RULES:
+- Plain text ONLY
+- NO markdown — no **bold**, no *italic*, no | tables |, no # headers, no bullet dashes
+- NO JSON
+- Write in natural flowing sentences and paragraphs only`;
 
     try {
       const response = await this.aiProvider.generate({
@@ -402,7 +412,16 @@ You can:
 
 If the user asks about specific products in our catalog, ask them to use the search.
 Keep responses concise and genuinely helpful.
-Never make up specific product prices or specs — use general knowledge ranges only.`,
+Never make up specific product prices or specs — use general knowledge ranges only.
+
+STRICT FORMATTING RULES — these are mandatory, no exceptions:
+- Plain text ONLY — never use markdown
+- No **bold** or *italic*
+- No # headers or ### headers
+- No | table | formatting
+- No bullet dashes (- item) or numbered lists (1. item) unless the user explicitly asks for a list
+- No <br> tags or HTML of any kind
+- Write in natural flowing sentences and paragraphs only`,
         temperature: 0.6,
         maxTokens: 384,
       });

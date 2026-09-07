@@ -73,6 +73,7 @@ export interface AgentContext {
     totalFound?: number;
     comparisonResult?: ComparisonResult;
     rankedProducts?: RankedProduct[];
+    bestPickOnly?: boolean;
     finalMessage?: string;
     followUpQuestions?: string[];
 }

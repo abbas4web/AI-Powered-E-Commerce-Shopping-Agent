@@ -96,6 +96,7 @@ export class AiOrchestratorService {
           // Try to extract refined requirements and re-search, unless it's a pure
           // "pick from these" question that needs no new DB query.
           const needsNewSearch = this.followUpNeedsNewSearch(message);
+          const isBestPick = this.isBestPickQuestion(message);
 
           if (needsNewSearch) {
             this.logger.debug(`[Pipeline] FOLLOWUP — re-search with refinement`);
@@ -105,9 +106,16 @@ export class AiOrchestratorService {
             context = await this.rankingAgent.run(context);
             pipelineTrace.push(`RankingAgent → ranked ${context.rankedProducts?.length}`);
           } else {
-            // Pure follow-up on existing results — no new DB query needed
+            // Pure follow-up — answer from existing results
             this.logger.debug(`[Pipeline] FOLLOWUP — using previous results`);
+            context.rankedProducts = previousSearchResults;
             pipelineTrace.push(`FOLLOWUP → using ${previousSearchResults.length} previous results`);
+          }
+
+          // "Which is best?" — tell ResponseAgent to show only the top card
+          if (isBestPick) {
+            context.bestPickOnly = true;
+            pipelineTrace.push(`FOLLOWUP → bestPickOnly flag set`);
           }
           break;
         }
@@ -223,6 +231,23 @@ export class AiOrchestratorService {
       /\b(add|include)\s+\w+\s+brand/, // "add Samsung"
     ];
     return needsNewSearch.some((p) => p.test(lower));
+  }
+
+  /**
+   * Detect "which is best / recommend one / top pick" follow-up questions.
+   * When true, the UI should show only the single best product card.
+   */
+  private isBestPickQuestion(message: string): boolean {
+    const lower = message.toLowerCase().trim();
+    const bestPickPatterns = [
+      /which.*(best|top|recommended|should i (buy|get|pick|choose))/,
+      /what.*(best|top|recommended|should i (buy|get|pick|choose))/,
+      /^(best one|top one|recommend (one|me one|the best))/,
+      /which (one|laptop|phone|product).*(buy|get|pick|take|prefer|go (for|with))/,
+      /^(which (should|would) (i|you))/,
+      /(recommend|suggest) (one|the best)/,
+    ];
+    return bestPickPatterns.some((p) => p.test(lower));
   }
 
   private async persistRecommendations(

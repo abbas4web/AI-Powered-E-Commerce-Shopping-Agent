@@ -119,6 +119,10 @@ export interface AgentContext {
   // Set by RankingAgent
   rankedProducts?: RankedProduct[];
 
+  // Set by orchestrator for "which is best?" follow-ups — ResponseAgent should
+  // trim rankedProducts to just the top 1 so only one card is shown in the UI.
+  bestPickOnly?: boolean;
+
   // Set by ResponseAgent
   finalMessage?: string;
   followUpQuestions?: string[];
