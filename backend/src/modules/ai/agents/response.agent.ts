@@ -4,6 +4,38 @@ import { AppLogger } from '../../../common/logger/logger.service';
 import { AgentContext, IAgent, RankedProduct } from './agent.types';
 
 /**
+ * Strip all common markdown syntax from a string so the frontend
+ * always receives plain prose regardless of what the LLM decides to output.
+ */
+function stripMarkdown(text: string): string {
+  return text
+    // Remove fenced code blocks (```...```)
+    .replace(/```[\s\S]*?```/g, '')
+    // Remove inline code (`...`)
+    .replace(/`[^`]*`/g, (m) => m.slice(1, -1))
+    // Remove headings (# ## ###)
+    .replace(/^#{1,6}\s+/gm, '')
+    // Remove bold/italic (*** ** * ___ __ _)
+    .replace(/(\*{1,3}|_{1,3})(.*?)\1/g, '$2')
+    // Remove markdown tables — replace | with nothing, drop separator rows
+    .replace(/^\|.*\|$/gm, (row) => row.replace(/\|/g, ' ').replace(/\s{2,}/g, ' ').trim())
+    .replace(/^[\s-|:]+$/gm, '')
+    // Remove blockquotes
+    .replace(/^>\s+/gm, '')
+    // Remove horizontal rules
+    .replace(/^(-{3,}|\*{3,}|_{3,})$/gm, '')
+    // Remove bullet list markers (- * + at line start)
+    .replace(/^[\s]*[-*+]\s+/gm, '')
+    // Remove numbered list markers (1. 2. etc)
+    .replace(/^[\s]*\d+\.\s+/gm, '')
+    // Remove HTML tags like <br>
+    .replace(/<[^>]+>/g, '')
+    // Collapse 3+ blank lines into 2
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+/**
  * ResponseAgent — writes the final human-readable message.
  *
  * Design principles (per spec):
@@ -27,21 +59,32 @@ export class ResponseAgent implements IAgent {
 
     switch (intent) {
       case 'PRODUCT_SEARCH':
-        return this.handleSearchResponse(context);
+        return this.dispatchAndClean(() => this.handleSearchResponse(context));
       case 'FOLLOWUP_SEARCH':
-        return this.handleFollowUpResponse(context);
+        return this.dispatchAndClean(() => this.handleFollowUpResponse(context));
       case 'PRODUCT_COMPARE':
-        return this.handleCompareResponse(context);
+        return this.dispatchAndClean(() => this.handleCompareResponse(context));
       case 'PRODUCT_DETAILS':
-        return this.handleDetailsResponse(context);
+        return this.dispatchAndClean(() => this.handleDetailsResponse(context));
       case 'WISHLIST':
-        return this.handleWishlistResponse(context);
+        return this.dispatchAndClean(() => this.handleWishlistResponse(context));
       case 'RECOMMENDATIONS':
-        return this.handleRecommendationsResponse(context);
+        return this.dispatchAndClean(() => this.handleRecommendationsResponse(context));
       case 'GENERAL':
       default:
-        return this.handleGeneralResponse(context);
+        return this.dispatchAndClean(() => this.handleGeneralResponse(context));
     }
+  }
+
+  // Strip markdown from finalMessage after every handler returns
+  private async dispatchAndClean(
+    handler: () => Promise<AgentContext>,
+  ): Promise<AgentContext> {
+    const ctx = await handler();
+    if (ctx.finalMessage) {
+      ctx.finalMessage = stripMarkdown(ctx.finalMessage);
+    }
+    return ctx;
   }
 
   // ─── Intent handlers ──────────────────────────────────────────────────────
