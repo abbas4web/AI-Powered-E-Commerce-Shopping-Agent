@@ -5,6 +5,7 @@ export declare class ResponseAgent implements IAgent {
     private readonly logger;
     constructor(aiProvider: IAIProvider);
     run(context: AgentContext): Promise<AgentContext>;
+    private dispatchAndClean;
     private handleSearchResponse;
     private handleFollowUpResponse;
     private handleCompareResponse;

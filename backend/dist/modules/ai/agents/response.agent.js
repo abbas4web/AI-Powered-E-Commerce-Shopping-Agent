@@ -16,6 +16,22 @@ exports.ResponseAgent = void 0;
 const common_1 = require("@nestjs/common");
 const ai_provider_interface_1 = require("../interfaces/ai-provider.interface");
 const logger_service_1 = require("../../../common/logger/logger.service");
+function stripMarkdown(text) {
+    return text
+        .replace(/```[\s\S]*?```/g, '')
+        .replace(/`[^`]*`/g, (m) => m.slice(1, -1))
+        .replace(/^#{1,6}\s+/gm, '')
+        .replace(/(\*{1,3}|_{1,3})(.*?)\1/g, '$2')
+        .replace(/^\|.*\|$/gm, (row) => row.replace(/\|/g, ' ').replace(/\s{2,}/g, ' ').trim())
+        .replace(/^[\s-|:]+$/gm, '')
+        .replace(/^>\s+/gm, '')
+        .replace(/^(-{3,}|\*{3,}|_{3,})$/gm, '')
+        .replace(/^[\s]*[-*+]\s+/gm, '')
+        .replace(/^[\s]*\d+\.\s+/gm, '')
+        .replace(/<[^>]+>/g, '')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+}
 let ResponseAgent = class ResponseAgent {
     constructor(aiProvider) {
         this.aiProvider = aiProvider;
@@ -25,21 +41,28 @@ let ResponseAgent = class ResponseAgent {
         const { intent } = context;
         switch (intent) {
             case 'PRODUCT_SEARCH':
-                return this.handleSearchResponse(context);
+                return this.dispatchAndClean(() => this.handleSearchResponse(context));
             case 'FOLLOWUP_SEARCH':
-                return this.handleFollowUpResponse(context);
+                return this.dispatchAndClean(() => this.handleFollowUpResponse(context));
             case 'PRODUCT_COMPARE':
-                return this.handleCompareResponse(context);
+                return this.dispatchAndClean(() => this.handleCompareResponse(context));
             case 'PRODUCT_DETAILS':
-                return this.handleDetailsResponse(context);
+                return this.dispatchAndClean(() => this.handleDetailsResponse(context));
             case 'WISHLIST':
-                return this.handleWishlistResponse(context);
+                return this.dispatchAndClean(() => this.handleWishlistResponse(context));
             case 'RECOMMENDATIONS':
-                return this.handleRecommendationsResponse(context);
+                return this.dispatchAndClean(() => this.handleRecommendationsResponse(context));
             case 'GENERAL':
             default:
-                return this.handleGeneralResponse(context);
+                return this.dispatchAndClean(() => this.handleGeneralResponse(context));
         }
+    }
+    async dispatchAndClean(handler) {
+        const ctx = await handler();
+        if (ctx.finalMessage) {
+            ctx.finalMessage = stripMarkdown(ctx.finalMessage);
+        }
+        return ctx;
     }
     async handleSearchResponse(context) {
         const { rankedProducts, requirements, originalMessage, history } = context;
