@@ -9,12 +9,12 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.RankingEngineService = exports.DEFAULT_RANKING_WEIGHTS = void 0;
 const common_1 = require("@nestjs/common");
 exports.DEFAULT_RANKING_WEIGHTS = {
-    requirementMatch: 0.35,
+    requirementMatch: 0.45,
     performance: 0.25,
-    rating: 0.15,
+    rating: 0.12,
     priceValue: 0.10,
-    reviewSentiment: 0.10,
-    popularity: 0.05,
+    reviewSentiment: 0.05,
+    popularity: 0.03,
 };
 let RankingEngineService = class RankingEngineService {
     rank(products, weights = exports.DEFAULT_RANKING_WEIGHTS) {

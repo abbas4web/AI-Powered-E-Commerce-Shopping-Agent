@@ -25,12 +25,12 @@ export interface RankingWeights {
 }
 
 export const DEFAULT_RANKING_WEIGHTS: RankingWeights = {
-  requirementMatch: 0.35,
+  requirementMatch: 0.45, // Increased from 0.35 — use-case fit is the primary signal
   performance: 0.25,
-  rating: 0.15,
+  rating: 0.12,
   priceValue: 0.10,
-  reviewSentiment: 0.10,
-  popularity: 0.05,
+  reviewSentiment: 0.05,
+  popularity: 0.03,
 };
 
 export interface ProductRankingInput {

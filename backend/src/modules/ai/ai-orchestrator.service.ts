@@ -246,20 +246,27 @@ export class AiOrchestratorService {
   }
 
   /**
-   * Detect "which is best / recommend one / top pick" follow-up questions.
-   * When true, the UI should show only the single best product card.
+   * Detect PURE "which one is best" follow-ups with NO new use case.
+   * "which is best?" → true (show top 1 card)
+   * "which is best for gaming?" → false (new use case, show all results)
+   * "which should I buy?" → true
    */
   private isBestPickQuestion(message: string): boolean {
     const lower = message.toLowerCase().trim();
-    const bestPickPatterns = [
-      /which.*(best|top|recommended|should i (buy|get|pick|choose))/,
-      /what.*(best|top|recommended|should i (buy|get|pick|choose))/,
-      /^(best one|top one|recommend (one|me one|the best))/,
-      /which (one|laptop|phone|product).*(buy|get|pick|take|prefer|go (for|with))/,
-      /^(which (should|would) (i|you))/,
-      /(recommend|suggest) (one|the best)/,
+
+    // If message contains a use-case keyword, it's NOT a pure best-pick question
+    const hasUseCase = /for\s+(gaming|game|graphic|design|web|dev|coding|programming|video|photography|business|flutter|android|study|work|office)/i.test(lower);
+    if (hasUseCase) return false;
+
+    // Pure best-pick patterns (no use-case mentioned)
+    const pureBestPick = [
+      /^which (is |one is |laptop is |phone is )?(the )?best\??$/,
+      /^(which|what) (one|should i (buy|get|pick|choose)|do you recommend)\??$/,
+      /^recommend (one|me one|the best one)\??$/,
+      /^(top pick|best one|pick one)\??$/,
+      /^which (one|laptop|phone) (to buy|should i get)\??$/,
     ];
-    return bestPickPatterns.some((p) => p.test(lower));
+    return pureBestPick.some((p) => p.test(lower));
   }
 
   private async persistRecommendations(

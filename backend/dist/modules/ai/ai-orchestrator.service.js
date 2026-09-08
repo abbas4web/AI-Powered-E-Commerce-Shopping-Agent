@@ -173,15 +173,17 @@ let AiOrchestratorService = class AiOrchestratorService {
     }
     isBestPickQuestion(message) {
         const lower = message.toLowerCase().trim();
-        const bestPickPatterns = [
-            /which.*(best|top|recommended|should i (buy|get|pick|choose))/,
-            /what.*(best|top|recommended|should i (buy|get|pick|choose))/,
-            /^(best one|top one|recommend (one|me one|the best))/,
-            /which (one|laptop|phone|product).*(buy|get|pick|take|prefer|go (for|with))/,
-            /^(which (should|would) (i|you))/,
-            /(recommend|suggest) (one|the best)/,
+        const hasUseCase = /for\s+(gaming|game|graphic|design|web|dev|coding|programming|video|photography|business|flutter|android|study|work|office)/i.test(lower);
+        if (hasUseCase)
+            return false;
+        const pureBestPick = [
+            /^which (is |one is |laptop is |phone is )?(the )?best\??$/,
+            /^(which|what) (one|should i (buy|get|pick|choose)|do you recommend)\??$/,
+            /^recommend (one|me one|the best one)\??$/,
+            /^(top pick|best one|pick one)\??$/,
+            /^which (one|laptop|phone) (to buy|should i get)\??$/,
         ];
-        return bestPickPatterns.some((p) => p.test(lower));
+        return pureBestPick.some((p) => p.test(lower));
     }
     async persistRecommendations(userId, conversationId, rankedProducts) {
         const top5 = rankedProducts.slice(0, 5);
