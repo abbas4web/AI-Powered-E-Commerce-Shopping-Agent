@@ -283,20 +283,23 @@ Plain text only.`;
 
   private async handleWishlistAdd(context: AgentContext): Promise<AgentContext> {
     const { wishlistProductId, rankedProducts, previousSearchResults } = context;
-
-    // Determine which product to add
     const products = rankedProducts?.length ? rankedProducts : previousSearchResults ?? [];
     const targetProduct = wishlistProductId
       ? products.find((p) => p.productId === wishlistProductId)
-      : products[0]; // default to top-ranked
+      : products[0];
 
     if (targetProduct) {
       context.finalMessage = `I've saved ${targetProduct.name} to your wishlist. You can view all saved items in the Wishlist section.`;
+    } else if (products.length > 0) {
+      // Products exist but none matched — save the top one anyway
+      const top = products[0];
+      context.finalMessage = `I've saved ${top.name} (the top recommendation) to your wishlist. Visit the Wishlist section to see all your saved items.`;
     } else {
-      context.finalMessage = "To save a product, tap the heart icon on any product card. Or tell me which product you'd like to save and I'll help.";
+      // No products in context at all — guide them
+      context.finalMessage = "I don't have a specific product to save yet. Search for a product first, then say 'save this' or tap the ❤ icon on any product card.";
     }
 
-    context.followUpQuestions = ['Would you like to see similar products?'];
+    context.followUpQuestions = products.length > 0 ? ['Want to compare these with similar products?'] : ['What product are you looking for?'];
     return context;
   }
 

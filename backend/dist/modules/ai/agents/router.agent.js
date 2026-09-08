@@ -30,6 +30,12 @@ let RouterAgent = class RouterAgent {
             this.logger.debug(`Wishlist intent: ${wishlistIntent}`);
             return context;
         }
+        const isClarificationAnswer = this.detectClarificationAnswer(originalMessage, history);
+        if (isClarificationAnswer) {
+            context.intent = 'PRODUCT_SEARCH';
+            this.logger.debug(`Clarification answer detected — routing to PRODUCT_SEARCH`);
+            return context;
+        }
         const isFollowUp = this.detectFollowUp(originalMessage, history, previousSearchResults);
         if (isFollowUp) {
             context.intent = 'FOLLOWUP_SEARCH';
@@ -90,6 +96,27 @@ Reply with ONLY the category name.`;
             'RECOMMENDATIONS', 'GENERAL',
         ];
         return intents.find((i) => raw.includes(i)) ?? 'GENERAL';
+    }
+    detectClarificationAnswer(message, history) {
+        const lastAssistant = [...history].reverse().find((h) => h.role === 'assistant');
+        if (!lastAssistant)
+            return false;
+        const lastMsg = lastAssistant.content.toLowerCase();
+        const isClarificationQuestion = lastMsg.includes("what's your budget") ||
+            lastMsg.includes("what is your budget") ||
+            lastMsg.includes("budget for") ||
+            lastMsg.includes("could you share") ||
+            lastMsg.includes("what will you primarily use") ||
+            lastMsg.includes("what would you use") ||
+            lastMsg.includes("what type of") ||
+            (lastMsg.includes('?') && lastMsg.length < 200 && lastMsg.includes('budget'));
+        if (!isClarificationQuestion)
+            return false;
+        const lower = message.toLowerCase().trim();
+        const looksLikeAnswer = /under|below|above|around|₹|rs\.|rupee|lakh|k\b|thousand|budget|no limit|any budget/i.test(lower) ||
+            /gaming|design|coding|development|college|school|office|work|study|flutter|android/i.test(lower) ||
+            /yes|no|okay|ok|sure|any|doesn't matter|not sure/i.test(lower);
+        return looksLikeAnswer;
     }
     detectWishlistIntent(message) {
         const lower = message.toLowerCase().trim();

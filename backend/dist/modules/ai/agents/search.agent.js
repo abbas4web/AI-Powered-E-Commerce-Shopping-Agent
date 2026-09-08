@@ -64,20 +64,23 @@ let SearchAgent = class SearchAgent {
 
 ${recentHistory ? `Recent conversation:\n${recentHistory}\n` : ''}Current message: "${message}"
 
+IMPORTANT: If the current message is answering a previous question (e.g. agent asked about budget and user replied "under 1 lakh"), combine the context from the conversation history with the current reply to extract complete requirements.
+
 Return JSON (include only what is explicitly mentioned):
 {
   "query": "product type as keywords (e.g. laptop, smartphone, headphones)",
-  "maxPrice": number (max budget in INR, e.g. 80000),
+  "maxPrice": number (max budget in INR — convert: 1 lakh = 100000, 80k = 80000),
   "minPrice": number (min price if mentioned),
-  "brandName": "brand name if specified (e.g. ASUS, Samsung, Apple)",
-  "useCases": ["array of use cases if mentioned (e.g. Flutter development, gaming, photography)"],
-  "mustHaveFeatures": ["key features if mentioned (e.g. 16GB RAM, 5G, noise cancellation)"]
+  "brandName": "brand name if specified",
+  "useCases": ["array of use cases if mentioned"],
+  "mustHaveFeatures": ["key features if mentioned"]
 }
 
 Examples:
 "I need laptop under 80k for Flutter" → {"query":"laptop","maxPrice":80000,"useCases":["Flutter development"]}
-"best phone under 40000 with good camera" → {"query":"smartphone","maxPrice":40000,"mustHaveFeatures":["good camera"]}
-"only ASUS" (follow-up) → {"query":"laptop","maxPrice":80000,"brandName":"ASUS"} (carry forward from history)
+"under 1 lakh" (after "I need laptop") → {"query":"laptop","maxPrice":100000}
+"under 50000" (after "I need phone") → {"query":"smartphone","maxPrice":50000}
+"no budget limit" (after "I need gaming laptop") → {"query":"laptop","useCases":["gaming"]}
 
 Return ONLY the JSON. No explanation.`;
         try {
@@ -93,7 +96,7 @@ Return ONLY the JSON. No explanation.`;
             if (raw.startsWith('{')) {
                 const parsed = JSON.parse(raw);
                 return {
-                    query: parsed.query ?? message,
+                    query: parsed.query ?? this.inferQueryFromHistory(message, history),
                     minPrice: parsed.minPrice,
                     maxPrice: parsed.maxPrice,
                     brandName: parsed.brandName,
@@ -105,7 +108,18 @@ Return ONLY the JSON. No explanation.`;
         catch (err) {
             this.logger.warn(`Requirement extraction failed: ${err.message}`);
         }
-        return { query: message };
+        return { query: this.inferQueryFromHistory(message, history) };
+    }
+    inferQueryFromHistory(message, history) {
+        const productTypes = ['laptop', 'phone', 'smartphone', 'tablet', 'headphone', 'earbuds', 'camera', 'tv', 'monitor', 'power bank'];
+        for (const turn of [...history].reverse()) {
+            const lower = turn.content.toLowerCase();
+            for (const type of productTypes) {
+                if (lower.includes(type))
+                    return type;
+            }
+        }
+        return message;
     }
 };
 exports.SearchAgent = SearchAgent;

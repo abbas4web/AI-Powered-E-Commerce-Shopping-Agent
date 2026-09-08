@@ -245,10 +245,14 @@ Plain text only.`;
         if (targetProduct) {
             context.finalMessage = `I've saved ${targetProduct.name} to your wishlist. You can view all saved items in the Wishlist section.`;
         }
-        else {
-            context.finalMessage = "To save a product, tap the heart icon on any product card. Or tell me which product you'd like to save and I'll help.";
+        else if (products.length > 0) {
+            const top = products[0];
+            context.finalMessage = `I've saved ${top.name} (the top recommendation) to your wishlist. Visit the Wishlist section to see all your saved items.`;
         }
-        context.followUpQuestions = ['Would you like to see similar products?'];
+        else {
+            context.finalMessage = "I don't have a specific product to save yet. Search for a product first, then say 'save this' or tap the ❤ icon on any product card.";
+        }
+        context.followUpQuestions = products.length > 0 ? ['Want to compare these with similar products?'] : ['What product are you looking for?'];
         return context;
     }
     async handleWishlistView(context) {

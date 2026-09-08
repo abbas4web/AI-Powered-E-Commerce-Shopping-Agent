@@ -8,4 +8,5 @@ export declare class SearchAgent implements IAgent {
     constructor(aiProvider: IAIProvider, searchService: SearchService);
     run(context: AgentContext): Promise<AgentContext>;
     private extractRequirements;
+    private inferQueryFromHistory;
 }

@@ -37,6 +37,15 @@ export class RouterAgent implements IAgent {
       return context;
     }
 
+    // Fast: detect if user is answering a clarification question
+    // e.g. agent asked "What's your budget?" → user replies "under 1lakh"
+    const isClarificationAnswer = this.detectClarificationAnswer(originalMessage, history);
+    if (isClarificationAnswer) {
+      context.intent = 'PRODUCT_SEARCH';
+      this.logger.debug(`Clarification answer detected — routing to PRODUCT_SEARCH`);
+      return context;
+    }
+
     // Fast: detect obvious follow-ups
     const isFollowUp = this.detectFollowUp(originalMessage, history, previousSearchResults);
     if (isFollowUp) {
@@ -106,6 +115,41 @@ Reply with ONLY the category name.`;
       'RECOMMENDATIONS', 'GENERAL',
     ];
     return intents.find((i) => raw.includes(i)) ?? 'GENERAL';
+  }
+
+  /**
+   * Detect when the user is answering a clarification question the agent asked.
+   * e.g. Agent: "What's your budget?" → User: "under 1 lakh" → PRODUCT_SEARCH
+   */
+  private detectClarificationAnswer(
+    message: string,
+    history: AgentContext['history'],
+  ): boolean {
+    // Check if the last assistant message was a clarification question
+    const lastAssistant = [...history].reverse().find((h) => h.role === 'assistant');
+    if (!lastAssistant) return false;
+
+    const lastMsg = lastAssistant.content.toLowerCase();
+    const isClarificationQuestion =
+      lastMsg.includes("what's your budget") ||
+      lastMsg.includes("what is your budget") ||
+      lastMsg.includes("budget for") ||
+      lastMsg.includes("could you share") ||
+      lastMsg.includes("what will you primarily use") ||
+      lastMsg.includes("what would you use") ||
+      lastMsg.includes("what type of") ||
+      (lastMsg.includes('?') && lastMsg.length < 200 && lastMsg.includes('budget'));
+
+    if (!isClarificationQuestion) return false;
+
+    // Check if the user's reply looks like an answer (budget, use case, etc.)
+    const lower = message.toLowerCase().trim();
+    const looksLikeAnswer =
+      /under|below|above|around|₹|rs\.|rupee|lakh|k\b|thousand|budget|no limit|any budget/i.test(lower) ||
+      /gaming|design|coding|development|college|school|office|work|study|flutter|android/i.test(lower) ||
+      /yes|no|okay|ok|sure|any|doesn't matter|not sure/i.test(lower);
+
+    return looksLikeAnswer;
   }
 
   private detectWishlistIntent(message: string): AgentIntent | null {
