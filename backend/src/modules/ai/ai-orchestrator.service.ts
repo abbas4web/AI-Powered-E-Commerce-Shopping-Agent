@@ -92,17 +92,19 @@ export class AiOrchestratorService {
           break;
 
         case 'FOLLOWUP_SEARCH': {
-          // The user is refining a previous search (e.g. "only ASUS", "which is best?")
-          // Try to extract refined requirements and re-search, unless it's a pure
-          // "pick from these" question that needs no new DB query.
           const needsNewSearch = this.followUpNeedsNewSearch(message);
           const isBestPick = this.isBestPickQuestion(message);
 
           if (needsNewSearch) {
             this.logger.debug(`[Pipeline] FOLLOWUP — re-search with refinement`);
+            // For use-case changes (gaming, design, etc.), clear old budget
+            // so we get the right laptops even if they exceed previous budget
+            const isUseCaseChange = /for\s+(gaming|graphic[\s-]*design|web[\s-]*dev|video[\s-]*editing|photography|business)/i.test(message);
+            if (isUseCaseChange) {
+              context.requirements = undefined; // fresh extraction without old budget
+            }
             context = await this.searchAgent.run(context);
             pipelineTrace.push(`SearchAgent (follow-up) → found ${context.totalFound}`);
-
             context = await this.rankingAgent.run(context);
             pipelineTrace.push(`RankingAgent → ranked ${context.rankedProducts?.length}`);
           } else {
@@ -112,7 +114,6 @@ export class AiOrchestratorService {
             pipelineTrace.push(`FOLLOWUP → using ${previousSearchResults.length} previous results`);
           }
 
-          // "Which is best?" — tell ResponseAgent to show only the top card
           if (isBestPick) {
             context.bestPickOnly = true;
             pipelineTrace.push(`FOLLOWUP → bestPickOnly flag set`);
@@ -211,26 +212,37 @@ export class AiOrchestratorService {
   // ─── Helpers ───────────────────────────────────────────────────────────────
 
   /**
-   * Determine whether a follow-up message needs a new DB search
-   * or can be answered from the already-retrieved previous results.
+   * Determine whether a follow-up message needs a new DB search.
    *
-   * "which is best?" → NO new search (answer from previous results)
-   * "only ASUS"      → YES new search (filter by brand)
-   * "increase budget to 90k" → YES new search
-   * "compare these"  → NO new search
+   * "which is best?"              → NO  (re-rank previous results)
+   * "only ASUS"                   → YES (filter by brand)
+   * "increase budget to 90k"      → YES (new price range)
+   * "which is best for gaming?"   → YES (new use case — needs different products)
+   * "best for graphic design?"    → YES (new use case)
    */
   private followUpNeedsNewSearch(message: string): boolean {
     const lower = message.toLowerCase().trim();
-    const needsNewSearch = [
-      /only\s+\w+/,                   // "only ASUS"
-      /increase.*(budget|price)/,      // "increase budget to 90k"
+
+    // ── Use-case change — always needs a fresh search ──────────────────────
+    // "which is best for gaming", "best for graphic design", "for web dev"
+    const useCaseChangePatterns = [
+      /for\s+(gaming|game|graphic\s*design|web\s*dev|development|coding|programming|video\s*editing|photography|business|flutter|android)/,
+      /(gaming|graphic\s*design|web\s*dev|video\s*editing|photography)\s*(laptop|phone|pc)?/,
+      /best\s+(gaming|design|coding|programming|developer)/,
+    ];
+    if (useCaseChangePatterns.some((p) => p.test(lower))) return true;
+
+    // ── Budget / price change ──────────────────────────────────────────────
+    const budgetChangePatterns = [
+      /only\s+\w+/,
+      /increase.*(budget|price)/,
       /decrease.*(budget|price)/,
       /change.*(budget|price|range)/,
-      /under\s+[\d,₹]+/,              // "under 70k"
+      /under\s+[\d,₹]+/,
       /above\s+[\d,₹]+/,
-      /\b(add|include)\s+\w+\s+brand/, // "add Samsung"
+      /\b(add|include)\s+\w+\s+brand/,
     ];
-    return needsNewSearch.some((p) => p.test(lower));
+    return budgetChangePatterns.some((p) => p.test(lower));
   }
 
   /**

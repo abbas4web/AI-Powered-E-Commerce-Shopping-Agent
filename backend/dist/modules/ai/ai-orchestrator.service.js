@@ -69,6 +69,10 @@ let AiOrchestratorService = class AiOrchestratorService {
                     const isBestPick = this.isBestPickQuestion(message);
                     if (needsNewSearch) {
                         this.logger.debug(`[Pipeline] FOLLOWUP — re-search with refinement`);
+                        const isUseCaseChange = /for\s+(gaming|graphic[\s-]*design|web[\s-]*dev|video[\s-]*editing|photography|business)/i.test(message);
+                        if (isUseCaseChange) {
+                            context.requirements = undefined;
+                        }
                         context = await this.searchAgent.run(context);
                         pipelineTrace.push(`SearchAgent (follow-up) → found ${context.totalFound}`);
                         context = await this.rankingAgent.run(context);
@@ -149,7 +153,14 @@ let AiOrchestratorService = class AiOrchestratorService {
     }
     followUpNeedsNewSearch(message) {
         const lower = message.toLowerCase().trim();
-        const needsNewSearch = [
+        const useCaseChangePatterns = [
+            /for\s+(gaming|game|graphic\s*design|web\s*dev|development|coding|programming|video\s*editing|photography|business|flutter|android)/,
+            /(gaming|graphic\s*design|web\s*dev|video\s*editing|photography)\s*(laptop|phone|pc)?/,
+            /best\s+(gaming|design|coding|programming|developer)/,
+        ];
+        if (useCaseChangePatterns.some((p) => p.test(lower)))
+            return true;
+        const budgetChangePatterns = [
             /only\s+\w+/,
             /increase.*(budget|price)/,
             /decrease.*(budget|price)/,
@@ -158,7 +169,7 @@ let AiOrchestratorService = class AiOrchestratorService {
             /above\s+[\d,₹]+/,
             /\b(add|include)\s+\w+\s+brand/,
         ];
-        return needsNewSearch.some((p) => p.test(lower));
+        return budgetChangePatterns.some((p) => p.test(lower));
     }
     isBestPickQuestion(message) {
         const lower = message.toLowerCase().trim();
