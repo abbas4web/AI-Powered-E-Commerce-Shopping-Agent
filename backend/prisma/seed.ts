@@ -3,787 +3,531 @@ import * as bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
 
-// ─── Image pools (real CDN images) ────────────────────────────────────────────
-// Using Unsplash Source API — stable, public, no auth needed
-const LAPTOP_IMAGES = [
-  'https://images.unsplash.com/photo-1496181133206-80ce9b88a853?w=400&q=80',
-  'https://images.unsplash.com/photo-1525547719571-a2d4ac8945e2?w=400&q=80',
-  'https://images.unsplash.com/photo-1484788984921-03950022c9ef?w=400&q=80',
-  'https://images.unsplash.com/photo-1593642632559-0c6d3fc62b89?w=400&q=80',
-  'https://images.unsplash.com/photo-1611186871525-f87b35d36cd2?w=400&q=80',
-  'https://images.unsplash.com/photo-1541807084-5c52b6b3adef?w=400&q=80',
-  'https://images.unsplash.com/photo-1517336714731-489689fd1ca8?w=400&q=80',
-  'https://images.unsplash.com/photo-1503376780353-7e6692767b70?w=400&q=80',
-  'https://images.unsplash.com/photo-1542393545-10f5cde2c810?w=400&q=80',
-  'https://images.unsplash.com/photo-1588702547919-26089e690ecc?w=400&q=80',
-];
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const PHONE_IMAGES = [
-  'https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?w=400&q=80',
-  'https://images.unsplash.com/photo-1565849904461-04a58ad377e0?w=400&q=80',
-  'https://images.unsplash.com/photo-1580910051074-3eb694886505?w=400&q=80',
-  'https://images.unsplash.com/photo-1574944985070-8f3ebc6b79d2?w=400&q=80',
-  'https://images.unsplash.com/photo-1585060544812-6b45742d762f?w=400&q=80',
-  'https://images.unsplash.com/photo-1601784551446-20c9e07cdbdb?w=400&q=80',
-  'https://images.unsplash.com/photo-1559050671-7e6b25bcb616?w=400&q=80',
-  'https://images.unsplash.com/photo-1512054502232-10a0a035d672?w=400&q=80',
-  'https://images.unsplash.com/photo-1598327105666-5b89351aff97?w=400&q=80',
-  'https://images.unsplash.com/photo-1550367363-ea12860cc124?w=400&q=80',
-];
-
-const HEADPHONE_IMAGES = [
-  'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=400&q=80',
-  'https://images.unsplash.com/photo-1583394838336-acd977736f90?w=400&q=80',
-  'https://images.unsplash.com/photo-1546435770-a3e426bf472b?w=400&q=80',
-  'https://images.unsplash.com/photo-1572536147248-ac59a8abfa4b?w=400&q=80',
-  'https://images.unsplash.com/photo-1487215078519-e21cc028cb29?w=400&q=80',
-  'https://images.unsplash.com/photo-1524678606370-a47ad25cb82a?w=400&q=80',
-  'https://images.unsplash.com/photo-1560393464-5c69a73c5770?w=400&q=80',
-  'https://images.unsplash.com/photo-1619143942700-f0e0a05a4f88?w=400&q=80',
-  'https://images.unsplash.com/photo-1609081219090-a6d81d3085bf?w=400&q=80',
-  'https://images.unsplash.com/photo-1545127398-14699f92334b?w=400&q=80',
-];
-
-function pick<T>(arr: T[], i: number): T {
-  return arr[i % arr.length];
+async function upsertCategory(data: { name: string; slug: string; description: string }) {
+  return prisma.category.upsert({
+    where: { slug: data.slug },
+    update: {},
+    create: data,
+  });
 }
 
-function rnd(min: number, max: number, step = 1): number {
-  const range = Math.floor((max - min) / step);
-  return min + Math.floor(Math.random() * (range + 1)) * step;
+async function upsertBrand(data: { name: string; slug: string; website?: string }) {
+  return prisma.brand.upsert({
+    where: { slug: data.slug },
+    update: {},
+    create: data,
+  });
 }
 
-function rating(): number {
-  return Math.round((3.2 + Math.random() * 1.7) * 10) / 10;
-}
-
-function slugify(text: string): string {
-  return text
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-}
-
-// ─── Laptop templates ──────────────────────────────────────────────────────────
-
-interface LaptopBrand {
+async function upsertProduct(data: {
   slug: string;
-  names: string[];
+  name: string;
+  description: string;
+  price: number;
+  originalPrice?: number;
+  imageUrl?: string;
+  rating: number;
+  reviewCount: number;
+  viewCount: number;
+  isFeatured?: boolean;
+  categoryId: string;
+  brandId: string;
+  specifications: object;
+}) {
+  return prisma.product.upsert({
+    where: { slug: data.slug },
+    update: { ...data },
+    create: { ...data },
+  });
 }
 
-const LAPTOP_BRANDS: LaptopBrand[] = [
-  {
-    slug: 'asus',
-    names: [
-      'Vivobook 15', 'Vivobook 16', 'Vivobook Pro 15', 'Vivobook Pro 16',
-      'Vivobook 15X OLED', 'Vivobook 16X OLED', 'Vivobook S 15 OLED',
-      'ZenBook 14', 'ZenBook 14 OLED', 'ZenBook 15', 'ZenBook Duo', 'ZenBook S 13 OLED',
-      'ROG Strix G15', 'ROG Strix G16', 'ROG Zephyrus G14', 'ROG Zephyrus G16',
-      'ROG Flow X13', 'ROG Flow Z13', 'ROG Strix Scar 16', 'ROG Strix Scar 18',
-      'TUF Gaming A15', 'TUF Gaming F15', 'TUF Gaming A17', 'TUF Gaming F17',
-      'ExpertBook B1', 'ExpertBook B3', 'Chromebook CX1', 'ProArt Studiobook 16',
-    ],
-  },
-  {
-    slug: 'dell',
-    names: [
-      'Inspiron 15 3520', 'Inspiron 15 3535', 'Inspiron 15 5530', 'Inspiron 16 5630',
-      'Inspiron 14 5430', 'Inspiron 14 7430', 'Inspiron 16 7630',
-      'Vostro 15 3530', 'Vostro 15 5630', 'Vostro 16 5630', 'Vostro 14 5430',
-      'XPS 13', 'XPS 13 Plus', 'XPS 15', 'XPS 17',
-      'Latitude 5540', 'Latitude 7440', 'Latitude 9440', 'Latitude 5340',
-      'G15 Gaming 5530', 'G16 Gaming 7630', 'G15 Gaming 5525',
-      'Alienware m16 R1', 'Alienware x16 R1', 'Alienware m18 R1',
-    ],
-  },
-  {
-    slug: 'lenovo',
-    names: [
-      'IdeaPad Slim 3', 'IdeaPad Slim 5', 'IdeaPad Slim 5i', 'IdeaPad Slim 5 Pro',
-      'IdeaPad Slim 3i', 'IdeaPad Slim 3 Gen 8', 'IdeaPad Slim 5 Gen 8',
-      'IdeaPad Flex 5', 'IdeaPad Flex 5i', 'IdeaPad Gaming 3', 'IdeaPad Gaming 3i',
-      'ThinkPad E14', 'ThinkPad E16', 'ThinkPad T14s', 'ThinkPad X1 Carbon',
-      'ThinkPad L14', 'ThinkPad X13', 'ThinkBook 14 G6',
-      'Yoga 7i', 'Yoga 9i', 'Yoga Slim 6i', 'Yoga Slim 7i',
-      'Legion 5', 'Legion 5i', 'Legion 5 Pro', 'Legion Slim 5', 'Legion Slim 5i',
-      'LOQ 15', 'LOQ 15i', 'LOQ 15APH9',
-    ],
-  },
-  {
-    slug: 'hp',
-    names: [
-      'Pavilion 15', 'Pavilion 15 eg', 'Pavilion Plus 14', 'Pavilion Plus 16',
-      'Pavilion x360 14', 'Pavilion Aero 13',
-      'Laptop 15s', 'Laptop 15s-eq', 'Laptop 15s-fq', 'Laptop 14s-fq', 'Laptop 14s-eq',
-      'Envy 13', 'Envy 14', 'Envy 15', 'Envy x360 13', 'Envy x360 15',
-      'Spectre x360 14', 'Spectre x360 16',
-      'ProBook 450 G10', 'ProBook 440 G10', 'EliteBook 840 G10', 'EliteBook 1040 G10',
-      'Omen 16', 'Omen Transcend 14', 'Omen 17',
-      'Victus 15', 'Victus 16', 'Victus 15 fa',
-    ],
-  },
-  {
-    slug: 'acer',
-    names: [
-      'Aspire 3', 'Aspire 3 Slim', 'Aspire 5', 'Aspire 5 Slim', 'Aspire 7', 'Aspire Vero 14',
-      'Aspire Lite', 'Aspire Go 15', 'Aspire Go 14',
-      'Swift 3', 'Swift 3 SF314', 'Swift Go 14', 'Swift Go 16', 'Swift X 14', 'Swift X 16',
-      'Nitro 5', 'Nitro V 15', 'Nitro V 16', 'Nitro 17',
-      'Predator Helios 16', 'Predator Helios 18', 'Predator Triton 16', 'Predator Helios 300',
-      'Chromebook 315', 'Chromebook Spin 713', 'ConceptD 5',
-    ],
-  },
-  {
-    slug: 'apple',
-    names: [
-      'MacBook Air M2 13', 'MacBook Air M2 15', 'MacBook Air M3 13', 'MacBook Air M3 15',
-      'MacBook Pro 14 M3', 'MacBook Pro 16 M3', 'MacBook Pro 14 M3 Pro',
-      'MacBook Pro 16 M3 Pro', 'MacBook Pro 14 M3 Max', 'MacBook Pro 16 M3 Max',
-    ],
-  },
-];
-
-const LAPTOP_PROCESSORS = [
-  'Intel Core i3-1215U', 'Intel Core i5-1235U', 'Intel Core i5-12450H',
-  'Intel Core i5-13420H', 'Intel Core i7-1255U', 'Intel Core i7-1355U',
-  'Intel Core i7-12650H', 'Intel Core i7-13620H', 'Intel Core i9-13900H',
-  'Intel Core Ultra 5 125H', 'Intel Core Ultra 7 155H',
-  'AMD Ryzen 3 7320U', 'AMD Ryzen 5 7520U', 'AMD Ryzen 5 7530U',
-  'AMD Ryzen 5 7535HS', 'AMD Ryzen 7 7730U', 'AMD Ryzen 7 7745HX',
-  'AMD Ryzen 9 7940HS', 'AMD Ryzen 9 7945HX',
-  'Apple M2', 'Apple M3', 'Apple M3 Pro', 'Apple M3 Max',
-];
-
-const LAPTOP_GPUS = [
-  'Intel Iris Xe Graphics', 'Intel Arc A370M', 'Intel Arc A530M',
-  'AMD Radeon Graphics', 'AMD Radeon RX 6600M', 'AMD Radeon RX 7600M XT',
-  'NVIDIA GeForce MX550', 'NVIDIA GeForce RTX 3050', 'NVIDIA GeForce RTX 3050 Ti',
-  'NVIDIA GeForce RTX 4050', 'NVIDIA GeForce RTX 4060', 'NVIDIA GeForce RTX 4070',
-  'NVIDIA GeForce RTX 4080', 'Apple M2 10-core GPU', 'Apple M3 18-core GPU',
-];
-
-const DISPLAY_PANELS = ['IPS', 'VA', 'OLED', 'AMOLED', 'Liquid Retina'];
-
-// ─── Phone templates ──────────────────────────────────────────────────────────
-
-interface PhoneBrand {
-  slug: string;
-  names: string[];
-}
-
-const PHONE_BRANDS: PhoneBrand[] = [
-  {
-    slug: 'samsung',
-    names: [
-      'Galaxy A04', 'Galaxy A04s', 'Galaxy A13', 'Galaxy A14', 'Galaxy A14 5G',
-      'Galaxy A23', 'Galaxy A23 5G', 'Galaxy A24', 'Galaxy A25 5G',
-      'Galaxy A34 5G', 'Galaxy A35 5G', 'Galaxy A54 5G', 'Galaxy A55 5G',
-      'Galaxy M14 5G', 'Galaxy M34 5G', 'Galaxy M54 5G', 'Galaxy M15 5G',
-      'Galaxy F14 5G', 'Galaxy F34 5G', 'Galaxy F54 5G',
-      'Galaxy S23', 'Galaxy S23+', 'Galaxy S23 Ultra',
-      'Galaxy S24', 'Galaxy S24+', 'Galaxy S24 Ultra',
-      'Galaxy Z Fold 5', 'Galaxy Z Flip 5',
-    ],
-  },
-  {
-    slug: 'apple',
-    names: [
-      'iPhone 13', 'iPhone 13 mini', 'iPhone 14', 'iPhone 14 Plus',
-      'iPhone 14 Pro', 'iPhone 14 Pro Max',
-      'iPhone 15', 'iPhone 15 Plus', 'iPhone 15 Pro', 'iPhone 15 Pro Max',
-    ],
-  },
-  {
-    slug: 'oneplus',
-    names: [
-      'OnePlus Nord CE 3 Lite', 'OnePlus Nord CE 3', 'OnePlus Nord 3',
-      'OnePlus Nord CE 4 Lite', 'OnePlus Nord CE 4', 'OnePlus Nord 4',
-      'OnePlus 11', 'OnePlus 11R', 'OnePlus 12', 'OnePlus 12R',
-      'OnePlus Open', 'OnePlus Ace 2V',
-    ],
-  },
-  {
-    slug: 'google',
-    names: [
-      'Pixel 7a', 'Pixel 7', 'Pixel 7 Pro',
-      'Pixel 8', 'Pixel 8 Pro', 'Pixel 8a',
-      'Pixel Fold',
-    ],
-  },
-  {
-    slug: 'sony',
-    names: [
-      'Xperia 10 V', 'Xperia 10 VI', 'Xperia 1 V', 'Xperia 1 VI',
-      'Xperia 5 V',
-    ],
-  },
-];
-
-const PHONE_PROCESSORS = [
-  'Snapdragon 4 Gen 2', 'Snapdragon 6 Gen 1', 'Snapdragon 7 Gen 1',
-  'Snapdragon 7s Gen 2', 'Snapdragon 7 Gen 3', 'Snapdragon 8 Gen 2',
-  'Snapdragon 8 Gen 3', 'Snapdragon 8s Gen 3',
-  'Dimensity 700', 'Dimensity 1080', 'Dimensity 7050', 'Dimensity 7200 Ultra',
-  'Dimensity 9200', 'Dimensity 9300',
-  'Exynos 1380', 'Exynos 2200', 'Exynos 2400',
-  'Apple A15 Bionic', 'Apple A16 Bionic', 'Apple A17 Pro',
-  'Google Tensor G2', 'Google Tensor G3',
-];
-
-// ─── Headphone templates ──────────────────────────────────────────────────────
-
-interface HeadphoneBrand {
-  slug: string;
-  names: string[];
-}
-
-const HEADPHONE_BRANDS: HeadphoneBrand[] = [
-  {
-    slug: 'sony',
-    names: [
-      'WH-1000XM4', 'WH-1000XM5', 'WH-CH720N', 'WH-CH520', 'WH-XB910N',
-      'WF-1000XM4', 'WF-1000XM5', 'WF-C700N', 'WF-C500', 'WF-SP800N',
-      'MDR-7506', 'MDR-ZX110', 'MDR-ZX310',
-      'Inzone H9', 'Inzone H7', 'Inzone H5', 'Inzone H3',
-    ],
-  },
-  {
-    slug: 'samsung',
-    names: [
-      'Galaxy Buds 2', 'Galaxy Buds 2 Pro', 'Galaxy Buds FE',
-      'Galaxy Buds Pro', 'Galaxy Buds Live',
-      'Galaxy Buds3', 'Galaxy Buds3 Pro',
-    ],
-  },
-  {
-    slug: 'apple',
-    names: [
-      'AirPods 3rd Gen', 'AirPods 4', 'AirPods Pro 2nd Gen',
-      'AirPods Max',
-    ],
-  },
-];
-
-// Additional headphone brands not in laptop/phone list
-const EXTRA_HP_BRANDS = [
-  { slug: 'jbl', name: 'JBL' },
-  { slug: 'bose', name: 'Bose' },
-  { slug: 'sennheiser', name: 'Sennheiser' },
-  { slug: 'boat', name: 'boAt' },
-  { slug: 'noise', name: 'Noise' },
-  { slug: 'realme', name: 'realme' },
-];
-
-const JBL_MODELS = [
-  'Tune 760NC', 'Tune 770NC', 'Tune 710BT', 'Tune 510BT', 'Tune 670NC',
-  'Live 660NC', 'Live 770NC', 'Live 460NC', 'Live 660NC', 'Tour One M2',
-  'Free X', 'Wave Flex', 'Wave Buds', 'Wave Beam', 'Wave 200TWS', 'Wave 300TWS',
-  'Vibe Beam', 'Vibe Buds', 'Club Pro Plus TWS', 'Reflect Flow Pro',
-  'Quantum 100', 'Quantum 350 Wireless', 'Quantum 800',
-];
-
-const BOSE_MODELS = [
-  'QuietComfort 45', 'QuietComfort Ultra', 'QuietComfort 35 II',
-  'QuietComfort Earbuds II', 'QuietComfort Ultra Earbuds',
-  'SoundLink Around-Ear II', 'SoundLink Flex', 'Sport Earbuds',
-  'SoundSport Free', 'Frames Tenor', 'Frames Soprano',
-];
-
-const SENNHEISER_MODELS = [
-  'Momentum 4 Wireless', 'Momentum True Wireless 3', 'Momentum True Wireless 4',
-  'Accentum Plus Wireless', 'Accentum Wireless',
-  'HD 560S', 'HD 620S', 'HD 450BT', 'HD 350BT',
-  'CX Plus True Wireless', 'CX True Wireless',
-];
-
-const BOAT_MODELS = [
-  'Rockerz 450', 'Rockerz 450 Pro', 'Rockerz 510', 'Rockerz 550', 'Rockerz 558 Pro',
-  'Rockerz 333 Pro', 'Rockerz 400', 'Rockerz 600',
-  'Airdopes 141', 'Airdopes 161', 'Airdopes 181', 'Airdopes 441', 'Airdopes 461',
-  'Airdopes 131', 'Airdopes 141 ANC', 'Airdopes 201', 'Airdopes 621',
-  'Bassheads 100', 'Bassheads 900', 'Bassheads 242', 'Bassheads 102',
-  'Immortal 1000D', 'Nirvana Ion', 'Nirvana Bliss',
-  'Wave Flex Pro', 'Wave Style', 'Wave Nano', 'Wave Buds',
-];
-
-const NOISE_MODELS = [
-  'Buds VS101', 'Buds VS301', 'Buds Comfort 2', 'Buds Connect 2',
-  'One ANC', 'Air Buds Pro', 'Air Buds Mini', 'Shots X5 Pro',
-  'ColorFit Icon Buds', 'Sense 1 ANC', 'Buds VS104',
-];
-
-const REALME_MODELS = [
-  'Buds T100', 'Buds T300', 'Buds Air 5 Pro', 'Buds Air 6 Pro',
-  'Buds Wireless 3 Neo', 'Buds Classic', 'Buds 2', 'Buds Air 3',
-  'Buds Air 3 Neo', 'Buds Air 3S', 'Buds Air 5', 'Buds N1',
-];
-
-// ─── Headphone extra brand models map ────────────────────────────────────────
-
-const EXTRA_HP_MODELS: Record<string, string[]> = {
-  jbl: JBL_MODELS,
-  bose: BOSE_MODELS,
-  sennheiser: SENNHEISER_MODELS,
-  boat: BOAT_MODELS,
-  noise: NOISE_MODELS,
-  realme: REALME_MODELS,
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
-  console.log('🌱 Seeding database with 1000+ products...');
+  console.log('🌱 Seeding database...\n');
 
-  // ── Categories ────────────────────────────────────────────
-  const categoryData = [
-    { name: 'Laptops', slug: 'laptops', description: 'Portable computers' },
-    { name: 'Smartphones', slug: 'smartphones', description: 'Mobile phones' },
-    { name: 'Headphones', slug: 'headphones', description: 'Audio headphones & earbuds' },
-    { name: 'Tablets', slug: 'tablets', description: 'Tablet computers' },
-    { name: 'Monitors', slug: 'monitors', description: 'Desktop monitors' },
-    { name: 'Cameras', slug: 'cameras', description: 'Digital cameras' },
-    { name: 'Televisions', slug: 'televisions', description: 'Smart TVs' },
+  // ── Categories ──────────────────────────────────────────────────────────────
+  const [catLaptops, catPhones, catHeadphones, catPowerBanks, catTablets, catMonitors, catCameras, catTVs] =
+    await Promise.all([
+      upsertCategory({ name: 'Laptops', slug: 'laptops', description: 'Portable computers' }),
+      upsertCategory({ name: 'Smartphones', slug: 'smartphones', description: 'Mobile phones' }),
+      upsertCategory({ name: 'Headphones', slug: 'headphones', description: 'Audio headphones & earbuds' }),
+      upsertCategory({ name: 'Power Banks', slug: 'power-banks', description: 'Portable chargers' }),
+      upsertCategory({ name: 'Tablets', slug: 'tablets', description: 'Tablet computers' }),
+      upsertCategory({ name: 'Monitors', slug: 'monitors', description: 'Desktop monitors' }),
+      upsertCategory({ name: 'Cameras', slug: 'cameras', description: 'Digital cameras' }),
+      upsertCategory({ name: 'Televisions', slug: 'televisions', description: 'Smart TVs' }),
+    ]);
+  console.log('✓ Categories seeded');
+
+  // ── Brands ───────────────────────────────────────────────────────────────────
+  const brands = await Promise.all([
+    upsertBrand({ name: 'Apple', slug: 'apple', website: 'https://apple.com' }),
+    upsertBrand({ name: 'Samsung', slug: 'samsung', website: 'https://samsung.com' }),
+    upsertBrand({ name: 'ASUS', slug: 'asus', website: 'https://asus.com' }),
+    upsertBrand({ name: 'Dell', slug: 'dell', website: 'https://dell.com' }),
+    upsertBrand({ name: 'Lenovo', slug: 'lenovo', website: 'https://lenovo.com' }),
+    upsertBrand({ name: 'HP', slug: 'hp', website: 'https://hp.com' }),
+    upsertBrand({ name: 'Acer', slug: 'acer', website: 'https://acer.com' }),
+    upsertBrand({ name: 'OnePlus', slug: 'oneplus', website: 'https://oneplus.com' }),
+    upsertBrand({ name: 'Google', slug: 'google', website: 'https://store.google.com' }),
+    upsertBrand({ name: 'Sony', slug: 'sony', website: 'https://sony.com' }),
+    upsertBrand({ name: 'Xiaomi', slug: 'xiaomi', website: 'https://mi.com' }),
+    upsertBrand({ name: 'realme', slug: 'realme', website: 'https://realme.com' }),
+    upsertBrand({ name: 'boAt', slug: 'boat', website: 'https://boat-lifestyle.com' }),
+    upsertBrand({ name: 'Noise', slug: 'noise', website: 'https://gonoise.com' }),
+    upsertBrand({ name: 'Anker', slug: 'anker', website: 'https://anker.com' }),
+    upsertBrand({ name: 'MSI', slug: 'msi', website: 'https://msi.com' }),
+    upsertBrand({ name: 'Microsoft', slug: 'microsoft', website: 'https://microsoft.com' }),
+    upsertBrand({ name: 'Motorola', slug: 'motorola', website: 'https://motorola.com' }),
+  ]);
+
+  const B: Record<string, string> = {};
+  for (const b of brands) B[b.slug] = b.id;
+  console.log('✓ Brands seeded');
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // LAPTOPS
+  // ══════════════════════════════════════════════════════════════════════════
+  const laptops = [
+    // Apple
+    { slug: 'apple-macbook-air-m2-2023', name: 'Apple MacBook Air M2 (2023)', brand: 'apple', price: 114900, originalPrice: 119900, rating: 4.8, reviewCount: 3210, viewCount: 42000, isFeatured: true,
+      imageUrl: 'https://images.unsplash.com/photo-1611186871348-b1ce696e52c9?w=600',
+      description: 'Apple MacBook Air M2 features the blazing-fast M2 chip, 13.6-inch Liquid Retina display, up to 18 hours of battery life, and a fanless silent design. Perfect for developers, students, and creators.',
+      specifications: { processor: 'Apple M2 8-core CPU', ram: 8, ramType: 'Unified Memory', storage: 256, storageType: 'SSD', display: { size: 13.6, resolution: '2560x1664', refreshRate: 60, panelType: 'Liquid Retina' }, battery: { capacity: 52.6, unit: 'Wh', life: 18 }, weight: 1.24, os: 'macOS Sonoma', ports: ['MagSafe 3', 'Thunderbolt 4 x2', '3.5mm Jack'] } },
+
+    { slug: 'apple-macbook-air-m3-2024', name: 'Apple MacBook Air M3 (2024)', brand: 'apple', price: 134900, originalPrice: 139900, rating: 4.9, reviewCount: 1840, viewCount: 28000, isFeatured: true,
+      imageUrl: 'https://images.unsplash.com/photo-1517336714731-489689fd1ca8?w=600',
+      description: 'MacBook Air M3 is the most advanced MacBook Air ever. M3 chip, up to 18-hour battery, support for two external displays. Perfect for power users on the go.',
+      specifications: { processor: 'Apple M3 8-core CPU', ram: 8, ramType: 'Unified Memory', storage: 256, storageType: 'SSD', display: { size: 13.6, resolution: '2560x1664', refreshRate: 60, panelType: 'Liquid Retina' }, battery: { capacity: 52.6, unit: 'Wh', life: 18 }, weight: 1.24, os: 'macOS Sonoma', ports: ['MagSafe 3', 'Thunderbolt 4 x2', '3.5mm Jack'] } },
+
+    { slug: 'apple-macbook-pro-14-m3-2024', name: 'Apple MacBook Pro 14" M3 Pro', brand: 'apple', price: 199900, originalPrice: 209900, rating: 4.9, reviewCount: 980, viewCount: 18000, isFeatured: true,
+      imageUrl: 'https://images.unsplash.com/photo-1486312338219-ce68d2c6f44d?w=600',
+      description: 'MacBook Pro 14-inch with M3 Pro chip, Liquid Retina XDR display, ProMotion 120Hz, up to 22 hours battery. The ultimate professional laptop for developers and creators.',
+      specifications: { processor: 'Apple M3 Pro 11-core CPU', ram: 18, ramType: 'Unified Memory', storage: 512, storageType: 'SSD', display: { size: 14.2, resolution: '3024x1964', refreshRate: 120, panelType: 'Liquid Retina XDR' }, battery: { capacity: 72, unit: 'Wh', life: 22 }, weight: 1.61, os: 'macOS Sonoma', ports: ['MagSafe 3', 'Thunderbolt 4 x3', 'HDMI 2.1', 'SD Card'] } },
+
+    { slug: 'apple-macbook-air-15-m3-2024', name: 'Apple MacBook Air 15" M3', brand: 'apple', price: 154900, originalPrice: 164900, rating: 4.9, reviewCount: 1020, viewCount: 18000, isFeatured: true,
+      imageUrl: 'https://images.unsplash.com/photo-1629131726692-1accd0c53ce0?w=600',
+      description: "MacBook Air 15-inch M3 — world's best 15-inch laptop. M3 chip, 15.3-inch Liquid Retina display, 18-hour battery, fanless design. Ideal for multitasking professionals.",
+      specifications: { processor: 'Apple M3 8-core CPU', ram: 8, ramType: 'Unified Memory', storage: 256, storageType: 'SSD', display: { size: 15.3, resolution: '2880x1864', refreshRate: 60, panelType: 'Liquid Retina' }, battery: { capacity: 66.5, unit: 'Wh', life: 18 }, weight: 1.51, os: 'macOS Sonoma', ports: ['MagSafe 3', 'Thunderbolt 4 x2', '3.5mm Jack'] } },
+
+    // Dell
+    { slug: 'dell-xps-15-9530-2023', name: 'Dell XPS 15 (9530)', brand: 'dell', price: 169990, originalPrice: 179990, rating: 4.6, reviewCount: 720, viewCount: 12000,
+      imageUrl: 'https://images.unsplash.com/photo-1588872657578-7efd1f1555ed?w=600',
+      description: 'Dell XPS 15 features 15.6-inch OLED 3.5K display, 13th-gen Intel Core i7, NVIDIA RTX 4060, and CNC aluminum chassis. Built for creative professionals.',
+      specifications: { processor: 'Intel Core i7-13700H', ram: 16, ramType: 'DDR5', storage: 512, storageType: 'SSD NVMe', display: { size: 15.6, resolution: '3456x2160', refreshRate: 60, panelType: 'OLED' }, battery: { capacity: 86, unit: 'Wh', life: 10 }, weight: 1.86, os: 'Windows 11 Home', ports: ['Thunderbolt 4 x2', 'USB-C 3.2', 'SD Card'], gpu: 'NVIDIA RTX 4060 8GB' } },
+
+    { slug: 'dell-inspiron-15-3530-2024', name: 'Dell Inspiron 15 3530 (2024)', brand: 'dell', price: 52990, originalPrice: 59990, rating: 4.2, reviewCount: 1420, viewCount: 18000,
+      imageUrl: 'https://images.unsplash.com/photo-1496181133206-80ce9b88a853?w=600',
+      description: 'Dell Inspiron 15 3530 powered by Intel Core i5-1335U, 16GB RAM, 512GB SSD. A reliable everyday laptop with Full HD display and all-day battery.',
+      specifications: { processor: 'Intel Core i5-1335U', ram: 16, ramType: 'DDR4', storage: 512, storageType: 'SSD', display: { size: 15.6, resolution: '1920x1080', refreshRate: 120, panelType: 'WVA' }, battery: { capacity: 54, unit: 'Wh', life: 9 }, weight: 1.76, os: 'Windows 11 Home', ports: ['USB-A 3.0 x2', 'USB-C 3.2', 'HDMI 1.4', 'SD Card'] } },
+
+    { slug: 'dell-g15-5530-gaming', name: 'Dell G15 Gaming (5530)', brand: 'dell', price: 89990, originalPrice: 99990, rating: 4.4, reviewCount: 890, viewCount: 14000,
+      imageUrl: 'https://images.unsplash.com/photo-1593642702821-c8da6771f0c6?w=600',
+      description: 'Dell G15 gaming laptop with Intel Core i7-13650HX, NVIDIA RTX 4060, 165Hz FHD display, and excellent thermal management for sustained gaming.',
+      specifications: { processor: 'Intel Core i7-13650HX', ram: 16, ramType: 'DDR5', storage: 512, storageType: 'SSD NVMe', display: { size: 15.6, resolution: '1920x1080', refreshRate: 165, panelType: 'IPS' }, battery: { capacity: 86, unit: 'Wh', life: 6 }, weight: 2.5, os: 'Windows 11 Home', ports: ['USB-A 3.2 x3', 'USB-C 3.2', 'HDMI 2.1', 'RJ45'], gpu: 'NVIDIA RTX 4060 8GB' } },
+
+    { slug: 'dell-vostro-15-3530-2024', name: 'Dell Vostro 15 3530 (2024)', brand: 'dell', price: 48990, originalPrice: 56990, rating: 4.1, reviewCount: 980, viewCount: 13000,
+      imageUrl: 'https://images.unsplash.com/photo-1525547719571-a2d4ac8945e2?w=600',
+      description: 'Dell Vostro 15 3530 with Intel Core i5-1335U, 8GB RAM, 512GB SSD. Business laptop with ProSupport and security features.',
+      specifications: { processor: 'Intel Core i5-1335U', ram: 8, ramType: 'DDR4', storage: 512, storageType: 'SSD', display: { size: 15.6, resolution: '1920x1080', refreshRate: 120, panelType: 'WVA' }, battery: { capacity: 54, unit: 'Wh', life: 8 }, weight: 1.73, os: 'Windows 11 Pro', ports: ['USB-A 3.0 x2', 'USB-C 3.2', 'HDMI 1.4'] } },
+
+    // Lenovo
+    { slug: 'lenovo-ideapad-slim-5-16-2024', name: 'Lenovo IdeaPad Slim 5 16" (2024)', brand: 'lenovo', price: 75990, originalPrice: 84990, rating: 4.4, reviewCount: 521, viewCount: 7100, isFeatured: true,
+      imageUrl: 'https://images.unsplash.com/photo-1541807084-5c52b6b3adef?w=600',
+      description: 'Lenovo IdeaPad Slim 5 16-inch with Intel Core i5-12450H, Intel Arc GPU, 16GB LPDDR5, 512GB SSD, and 12-hour battery. Excellent battery life for Flutter developers.',
+      specifications: { processor: 'Intel Core i5-12450H', ram: 16, ramType: 'LPDDR5', storage: 512, storageType: 'SSD', display: { size: 15.6, resolution: '1920x1080', refreshRate: 60, panelType: 'IPS' }, battery: { capacity: 60, unit: 'Wh', life: 12 }, weight: 1.65, os: 'Windows 11 Home', ports: ['USB-A 3.2 x2', 'USB-C 3.2 x2', 'HDMI 2.0'] } },
+
+    { slug: 'lenovo-thinkpad-x1-carbon-gen11', name: 'Lenovo ThinkPad X1 Carbon Gen 11', brand: 'lenovo', price: 159990, originalPrice: 174990, rating: 4.7, reviewCount: 420, viewCount: 8000,
+      imageUrl: 'https://images.unsplash.com/photo-1544731612-de7f96afe55f?w=600',
+      description: 'ThinkPad X1 Carbon Gen 11: the legendary ultralight business laptop. 1.12kg, Intel Core i7-1365U, 14-inch 2.8K OLED, MIL-SPEC durability, all-day battery.',
+      specifications: { processor: 'Intel Core i7-1365U', ram: 16, ramType: 'LPDDR5', storage: 512, storageType: 'SSD', display: { size: 14, resolution: '2880x1800', refreshRate: 60, panelType: 'OLED' }, battery: { capacity: 57, unit: 'Wh', life: 15 }, weight: 1.12, os: 'Windows 11 Pro', ports: ['Thunderbolt 4 x2', 'USB-A 3.2 x2', 'HDMI 2.0'] } },
+
+    { slug: 'lenovo-yoga-9i-2024', name: 'Lenovo Yoga 9i (2024)', brand: 'lenovo', price: 129990, originalPrice: 139990, rating: 4.6, reviewCount: 310, viewCount: 6000,
+      imageUrl: 'https://images.unsplash.com/photo-1593642632559-0c6d3fc62b89?w=600',
+      description: 'Lenovo Yoga 9i 2-in-1 with Intel Core Ultra 7, 14-inch OLED 2.8K 120Hz display, rotating soundbar, and premium build. The best 2-in-1 laptop in its class.',
+      specifications: { processor: 'Intel Core Ultra 7 155H', ram: 16, ramType: 'LPDDR5X', storage: 1000, storageType: 'SSD', display: { size: 14, resolution: '2880x1800', refreshRate: 120, panelType: 'OLED' }, battery: { capacity: 75, unit: 'Wh', life: 12 }, weight: 1.4, os: 'Windows 11 Home', ports: ['Thunderbolt 4 x2', 'USB-A 3.2', 'HDMI 2.1'] } },
+
+    { slug: 'lenovo-legion-5i-gen9-2024', name: 'Lenovo Legion 5i Gen 9 (2024)', brand: 'lenovo', price: 99990, originalPrice: 109990, rating: 4.5, reviewCount: 680, viewCount: 11000,
+      imageUrl: 'https://images.unsplash.com/photo-1603302576837-37561b2e2302?w=600',
+      description: 'Lenovo Legion 5i Gen 9: Intel Core i7-14650HX, NVIDIA RTX 4060, 165Hz FHD display, Legion ColdFront cooling. Gaming laptop with professional build quality.',
+      specifications: { processor: 'Intel Core i7-14650HX', ram: 16, ramType: 'DDR5', storage: 512, storageType: 'SSD NVMe', display: { size: 15.6, resolution: '1920x1080', refreshRate: 165, panelType: 'IPS' }, battery: { capacity: 80, unit: 'Wh', life: 7 }, weight: 2.4, os: 'Windows 11 Home', ports: ['USB-C 3.2 x2', 'USB-A 3.2 x3', 'HDMI 2.1', 'RJ45'], gpu: 'NVIDIA RTX 4060 8GB' } },
+
+    // ASUS
+    { slug: 'asus-vivobook-16-2024', name: 'ASUS Vivobook 16 (2024)', brand: 'asus', price: 72990, originalPrice: 82990, rating: 4.3, reviewCount: 412, viewCount: 5800, isFeatured: true,
+      imageUrl: 'https://images.unsplash.com/photo-1484788984921-03950022c9ef?w=600',
+      description: 'ASUS Vivobook 16 with AMD Ryzen 7 7730U, 16GB DDR4, 512GB SSD, 16-inch FHD IPS display. Powerful all-rounder for development and light gaming.',
+      specifications: { processor: 'AMD Ryzen 7 7730U', ram: 16, ramType: 'DDR4', storage: 512, storageType: 'SSD', display: { size: 16, resolution: '1920x1200', refreshRate: 60, panelType: 'IPS' }, battery: { capacity: 50, unit: 'Wh', life: 8 }, weight: 1.88, os: 'Windows 11 Home', ports: ['USB-A 3.2 x2', 'USB-C 3.2', 'HDMI 1.4', '3.5mm Jack', 'SD Card'] } },
+
+    { slug: 'asus-zenbook-14-oled-2024', name: 'ASUS Zenbook 14 OLED (2024)', brand: 'asus', price: 89990, originalPrice: 99990, rating: 4.6, reviewCount: 580, viewCount: 9500, isFeatured: true,
+      imageUrl: 'https://images.unsplash.com/photo-1531297484001-80022131f5a1?w=600',
+      description: 'ASUS Zenbook 14 OLED with Intel Core Ultra 7, 14-inch 2.8K 120Hz OLED display, 32GB RAM, and 1TB SSD. Ultra-portable powerhouse for creators.',
+      specifications: { processor: 'Intel Core Ultra 7 155H', ram: 32, ramType: 'LPDDR5X', storage: 1000, storageType: 'SSD', display: { size: 14, resolution: '2880x1800', refreshRate: 120, panelType: 'OLED' }, battery: { capacity: 75, unit: 'Wh', life: 14 }, weight: 1.2, os: 'Windows 11 Home', ports: ['Thunderbolt 4 x2', 'USB-A 3.2', 'HDMI 2.1'] } },
+
+    { slug: 'asus-rog-strix-g16-2024', name: 'ASUS ROG Strix G16 (2024)', brand: 'asus', price: 119990, originalPrice: 129990, rating: 4.6, reviewCount: 480, viewCount: 9000,
+      imageUrl: 'https://images.unsplash.com/photo-1519389950473-47ba0277781c?w=600',
+      description: 'ASUS ROG Strix G16 gaming laptop with Intel Core i9-14900HX, NVIDIA RTX 4070, 240Hz QHD display, MUX Switch, and ROG Intelligent Cooling.',
+      specifications: { processor: 'Intel Core i9-14900HX', ram: 16, ramType: 'DDR5', storage: 1000, storageType: 'SSD NVMe', display: { size: 16, resolution: '2560x1600', refreshRate: 240, panelType: 'IPS' }, battery: { capacity: 90, unit: 'Wh', life: 5 }, weight: 2.5, os: 'Windows 11 Home', ports: ['USB-C 4.0', 'USB-A 3.2 x3', 'HDMI 2.1', 'RJ45'], gpu: 'NVIDIA RTX 4070 8GB' } },
+
+    { slug: 'asus-vivobook-15-x1502za', name: 'ASUS Vivobook 15 X1502 (2023)', brand: 'asus', price: 54990, originalPrice: 62990, rating: 4.2, reviewCount: 820, viewCount: 11000,
+      imageUrl: 'https://images.unsplash.com/photo-1448932223592-d1fc686e76ea?w=600',
+      description: 'ASUS Vivobook 15 with Intel Core i5-12500H, 16GB DDR4, 512GB SSD, FHD IPS 60Hz display. Budget-friendly and capable laptop for everyday computing.',
+      specifications: { processor: 'Intel Core i5-12500H', ram: 16, ramType: 'DDR4', storage: 512, storageType: 'SSD', display: { size: 15.6, resolution: '1920x1080', refreshRate: 60, panelType: 'IPS' }, battery: { capacity: 42, unit: 'Wh', life: 7 }, weight: 1.7, os: 'Windows 11 Home', ports: ['USB-A 3.2 x2', 'USB-C 3.2', 'HDMI 1.4', 'SD Card'] } },
+
+    // HP
+    { slug: 'hp-envy-x360-14-2024', name: 'HP Envy x360 14 (2024)', brand: 'hp', price: 99990, originalPrice: 112990, rating: 4.5, reviewCount: 380, viewCount: 7200,
+      imageUrl: 'https://images.unsplash.com/photo-1593642634315-48f5414c3ad9?w=600',
+      description: 'HP Envy x360 14 with AMD Ryzen 7 8840U, 14-inch 2.8K OLED 120Hz touchscreen, 16GB RAM, 1TB SSD, and impressive battery life. 2-in-1 for professionals.',
+      specifications: { processor: 'AMD Ryzen 7 8840U', ram: 16, ramType: 'LPDDR5X', storage: 1000, storageType: 'SSD', display: { size: 14, resolution: '2880x1800', refreshRate: 120, panelType: 'OLED Touch' }, battery: { capacity: 65, unit: 'Wh', life: 14 }, weight: 1.4, os: 'Windows 11 Home', ports: ['USB-C 4.0 x2', 'USB-A 3.2', 'HDMI 2.1'] } },
+
+    { slug: 'hp-pavilion-15-eg3-2024', name: 'HP Pavilion 15 (eg3, 2024)', brand: 'hp', price: 61990, originalPrice: 70990, rating: 4.1, reviewCount: 640, viewCount: 9000,
+      imageUrl: 'https://images.unsplash.com/photo-1510557880182-3d4d3cba35a5?w=600',
+      description: 'HP Pavilion 15 with Intel Core i5-1335U, 16GB RAM, 512GB SSD, and micro-edge FHD display. Great everyday laptop for students and home users.',
+      specifications: { processor: 'Intel Core i5-1335U', ram: 16, ramType: 'DDR4', storage: 512, storageType: 'SSD', display: { size: 15.6, resolution: '1920x1080', refreshRate: 60, panelType: 'IPS' }, battery: { capacity: 41, unit: 'Wh', life: 8 }, weight: 1.75, os: 'Windows 11 Home', ports: ['USB-A 3.0 x2', 'USB-C 3.2', 'HDMI 1.4', 'SD Card'] } },
+
+    { slug: 'hp-omen-16-gaming-2024', name: 'HP Omen 16 Gaming (2024)', brand: 'hp', price: 119990, originalPrice: 134990, rating: 4.5, reviewCount: 290, viewCount: 5500,
+      imageUrl: 'https://images.unsplash.com/photo-1542393545-10f5cde2c810?w=600',
+      description: 'HP Omen 16 gaming laptop with Intel Core i7-14700HX, NVIDIA RTX 4070, 165Hz QHD display, OMEN Tempest cooling, and customizable RGB keyboard.',
+      specifications: { processor: 'Intel Core i7-14700HX', ram: 16, ramType: 'DDR5', storage: 1000, storageType: 'SSD NVMe', display: { size: 16.1, resolution: '2560x1440', refreshRate: 165, panelType: 'IPS' }, battery: { capacity: 83, unit: 'Wh', life: 6 }, weight: 2.3, os: 'Windows 11 Home', ports: ['USB-C 4.0', 'USB-A 3.2 x3', 'HDMI 2.1', 'RJ45'], gpu: 'NVIDIA RTX 4070 8GB' } },
+
+    // Acer
+    { slug: 'acer-aspire-5-a515-2024', name: 'Acer Aspire 5 (A515, 2024)', brand: 'acer', price: 49990, originalPrice: 57990, rating: 4.1, reviewCount: 1120, viewCount: 15000,
+      imageUrl: 'https://images.unsplash.com/photo-1468436139062-f60a71c5c892?w=600',
+      description: 'Acer Aspire 5 with AMD Ryzen 5 7530U, 16GB RAM, 512GB SSD, 15.6-inch FHD IPS. Value-for-money laptop for students and everyday computing.',
+      specifications: { processor: 'AMD Ryzen 5 7530U', ram: 16, ramType: 'DDR4', storage: 512, storageType: 'SSD', display: { size: 15.6, resolution: '1920x1080', refreshRate: 60, panelType: 'IPS' }, battery: { capacity: 50, unit: 'Wh', life: 8 }, weight: 1.8, os: 'Windows 11 Home', ports: ['USB-A 3.2 x2', 'USB-C 3.2', 'HDMI 2.0', 'SD Card'] } },
+
+    { slug: 'acer-swift-go-14-2024', name: 'Acer Swift Go 14 (2024)', brand: 'acer', price: 79990, originalPrice: 89990, rating: 4.4, reviewCount: 360, viewCount: 6500,
+      imageUrl: 'https://images.unsplash.com/photo-1504707748692-419802cf939d?w=600',
+      description: 'Acer Swift Go 14 with Intel Core Ultra 5, 14-inch 2.8K OLED display, 16GB RAM, 512GB SSD, and excellent battery life in a premium aluminium chassis.',
+      specifications: { processor: 'Intel Core Ultra 5 125U', ram: 16, ramType: 'LPDDR5', storage: 512, storageType: 'SSD', display: { size: 14, resolution: '2880x1800', refreshRate: 90, panelType: 'OLED' }, battery: { capacity: 65, unit: 'Wh', life: 12 }, weight: 1.35, os: 'Windows 11 Home', ports: ['Thunderbolt 4', 'USB-C 3.2', 'USB-A 3.2 x2', 'HDMI 2.0'] } },
+
+    { slug: 'acer-nitro-16-gaming-2024', name: 'Acer Nitro 16 Gaming (2024)', brand: 'acer', price: 84990, originalPrice: 94990, rating: 4.3, reviewCount: 520, viewCount: 8500,
+      imageUrl: 'https://images.unsplash.com/photo-1461749280684-dccba630e2f6?w=600',
+      description: 'Acer Nitro 16 with AMD Ryzen 7 7745HX, NVIDIA RTX 4060, 165Hz QHD display, and Acer CoolBoost cooling. A capable gaming laptop at a great price.',
+      specifications: { processor: 'AMD Ryzen 7 7745HX', ram: 16, ramType: 'DDR5', storage: 512, storageType: 'SSD NVMe', display: { size: 16, resolution: '2560x1600', refreshRate: 165, panelType: 'IPS' }, battery: { capacity: 90, unit: 'Wh', life: 6 }, weight: 2.5, os: 'Windows 11 Home', ports: ['USB-C 3.2', 'USB-A 3.2 x3', 'HDMI 2.1', 'RJ45'], gpu: 'NVIDIA RTX 4060 8GB' } },
+
+    // MSI
+    { slug: 'msi-modern-15-2024', name: 'MSI Modern 15 (2024)', brand: 'msi', price: 57990, originalPrice: 64990, rating: 4.2, reviewCount: 280, viewCount: 4500,
+      imageUrl: 'https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?w=600',
+      description: 'MSI Modern 15 with Intel Core i5-1335U, 16GB RAM, 512GB NVMe SSD, FHD IPS display. Thin, light, and stylish laptop for business and students.',
+      specifications: { processor: 'Intel Core i5-1335U', ram: 16, ramType: 'DDR4', storage: 512, storageType: 'SSD', display: { size: 15.6, resolution: '1920x1080', refreshRate: 60, panelType: 'IPS' }, battery: { capacity: 52, unit: 'Wh', life: 9 }, weight: 1.6, os: 'Windows 11 Home', ports: ['USB-C 3.2', 'USB-A 3.2 x2', 'HDMI 2.0', 'SD Card'] } },
+
+    { slug: 'msi-titan-gt77-2024', name: 'MSI Titan GT77 HX (2024)', brand: 'msi', price: 249990, originalPrice: 274990, rating: 4.7, reviewCount: 140, viewCount: 4200,
+      imageUrl: 'https://images.unsplash.com/photo-1547394765-185e1e68f34e?w=600',
+      description: 'MSI Titan GT77 with Intel Core i9-14900HX, NVIDIA RTX 4090, 17.3-inch 4K 144Hz Mini-LED display. The most powerful gaming laptop money can buy.',
+      specifications: { processor: 'Intel Core i9-14900HX', ram: 64, ramType: 'DDR5', storage: 2000, storageType: 'SSD NVMe x2', display: { size: 17.3, resolution: '3840x2160', refreshRate: 144, panelType: 'Mini-LED' }, battery: { capacity: 99, unit: 'Wh', life: 4 }, weight: 3.3, os: 'Windows 11 Pro', ports: ['Thunderbolt 4 x2', 'USB-A 3.2 x4', 'HDMI 2.1', 'RJ45'], gpu: 'NVIDIA RTX 4090 16GB' } },
+
+    // Microsoft Surface
+    { slug: 'microsoft-surface-laptop-5-2024', name: 'Microsoft Surface Laptop 5 (2024)', brand: 'microsoft', price: 99990, originalPrice: 109990, rating: 4.5, reviewCount: 310, viewCount: 5800,
+      imageUrl: 'https://images.unsplash.com/photo-1588702547919-26089e690ecc?w=600',
+      description: 'Microsoft Surface Laptop 5 with Intel Core i5-1245U, 13.5-inch PixelSense touchscreen, 16GB RAM, premium Alcantara keyboard, and 18-hour battery.',
+      specifications: { processor: 'Intel Core i5-1245U', ram: 16, ramType: 'LPDDR5', storage: 512, storageType: 'SSD', display: { size: 13.5, resolution: '2256x1504', refreshRate: 60, panelType: 'PixelSense Touch' }, battery: { capacity: 47.4, unit: 'Wh', life: 18 }, weight: 1.29, os: 'Windows 11 Home', ports: ['USB-C 3.2', 'USB-A 3.2', 'Surface Connect', '3.5mm Jack'] } },
   ];
 
-  const categories = await Promise.all(
-    categoryData.map((c) =>
-      prisma.category.upsert({
-        where: { slug: c.slug },
-        update: {},
-        create: c,
-      }),
-    ),
-  );
-  console.log(`✓ ${categories.length} categories`);
-
-  const laptopCat = categories.find((c) => c.slug === 'laptops')!;
-  const phoneCat = categories.find((c) => c.slug === 'smartphones')!;
-  const headphoneCat = categories.find((c) => c.slug === 'headphones')!;
-
-  // ── Brands ────────────────────────────────────────────────
-  const brandData = [
-    { name: 'Apple', slug: 'apple' },
-    { name: 'Samsung', slug: 'samsung' },
-    { name: 'ASUS', slug: 'asus' },
-    { name: 'Dell', slug: 'dell' },
-    { name: 'Lenovo', slug: 'lenovo' },
-    { name: 'HP', slug: 'hp' },
-    { name: 'Acer', slug: 'acer' },
-    { name: 'OnePlus', slug: 'oneplus' },
-    { name: 'Google', slug: 'google' },
-    { name: 'Sony', slug: 'sony' },
-    { name: 'JBL', slug: 'jbl' },
-    { name: 'Bose', slug: 'bose' },
-    { name: 'Sennheiser', slug: 'sennheiser' },
-    { name: 'boAt', slug: 'boat' },
-    { name: 'Noise', slug: 'noise' },
-    { name: 'realme', slug: 'realme' },
-  ];
-
-  const brands = await Promise.all(
-    brandData.map((b) =>
-      prisma.brand.upsert({
-        where: { slug: b.slug },
-        update: {},
-        create: b,
-      }),
-    ),
-  );
-  console.log(`✓ ${brands.length} brands`);
-
-  const brandMap = Object.fromEntries(brands.map((b) => [b.slug, b]));
-
-  // ── Helpers ───────────────────────────────────────────────
-  function laptopDesc(name: string, brand: string, processor: string, ram: number, gpu: string): string {
-    const use = gpu.includes('RTX') || gpu.includes('RX 6') || gpu.includes('RX 7')
-      ? 'gaming and content creation'
-      : ram >= 32
-      ? 'heavy multitasking and development'
-      : 'everyday productivity and development';
-    return `${brand} ${name} powered by ${processor} with ${ram}GB RAM and ${gpu}. Designed for ${use}, it offers a great balance of performance and portability.`;
-  }
-
-  function phoneDesc(name: string, brand: string, processor: string, ram: number, camera: number): string {
-    return `${brand} ${name} runs on ${processor} with ${ram}GB RAM and a ${camera}MP main camera. A feature-packed smartphone built for performance and photography in India.`;
-  }
-
-  function headphoneDesc(name: string, brand: string, type: string, anc: boolean, battery: number): string {
-    const ancStr = anc ? 'Active Noise Cancellation (ANC)' : 'passive noise isolation';
-    if (type === 'TWS') {
-      return `${brand} ${name} — compact true wireless earbuds with ${ancStr}, ${battery}h total battery, and seamless Bluetooth pairing for music and calls on the go.`;
-    }
-    return `${brand} ${name} — ${type} headphones featuring ${ancStr}, ${battery}h playback, and premium audio drivers engineered for immersive listening.`;
-  }
-
-  // ─────────────────────────────────────────────────────────
-  // LAPTOPS  (~400 products)
-  // Each brand × model × 2 RAM variants = ~370–400 entries
-  // ─────────────────────────────────────────────────────────
-  console.log('  Generating laptops...');
-
-  const laptopProducts: object[] = [];
-  let laptopIdx = 0;
-
-  for (const brandDef of LAPTOP_BRANDS) {
-    const brand = brandMap[brandDef.slug];
-    for (const modelName of brandDef.names) {
-      const isApple = brandDef.slug === 'apple';
-      const ramVariants = isApple ? [8, 16, 24] : [8, 16, 32];
-
-      for (const ram of ramVariants) {
-        const processor = isApple
-          ? LAPTOP_PROCESSORS.find((p) => p.startsWith('Apple')) ?? 'Apple M3'
-          : LAPTOP_PROCESSORS[laptopIdx % (LAPTOP_PROCESSORS.length - 3)];
-
-        const gpu = isApple
-          ? (modelName.includes('Pro') ? 'Apple M3 18-core GPU' : 'Apple M2 10-core GPU')
-          : LAPTOP_GPUS[laptopIdx % LAPTOP_GPUS.length];
-
-        const isGaming = modelName.match(/ROG|TUF|Nitro|Predator|Alienware|LOQ|Legion|Omen|G15|G16|Strix|Helios/i);
-        const basePrice = isApple
-          ? rnd(99900, 219900, 1000)
-          : isGaming
-          ? rnd(65000, 180000, 500)
-          : rnd(32000, 95000, 500);
-
-        const originalPrice = Math.round(basePrice * (1 + rnd(5, 20) / 100) / 500) * 500;
-        const storage = isApple ? (ram === 8 ? 256 : 512) : rnd(256, 1024, 256);
-        const displaySize = modelName.includes('14') ? 14 : modelName.includes('16') ? 16 : modelName.includes('17') ? 17 : 15.6;
-        const refreshRate = isGaming ? rnd(1, 4) * 60 : 60;
-        const panel = isApple ? 'Liquid Retina' : DISPLAY_PANELS[laptopIdx % 4];
-        const weight = isApple ? 1.24 + Math.random() * 0.5 : 1.4 + Math.random() * 1.1;
-        const batteryLife = isApple ? rnd(16, 22) : isGaming ? rnd(4, 8) : rnd(7, 14);
-
-        const slug = `${slugify(brandDef.slug + '-' + modelName)}-${ram}gb-${storage}gb-${laptopIdx}`;
-
-        laptopProducts.push({
-          name: `${brand.name} ${modelName} (${ram}GB)`,
-          slug,
-          description: laptopDesc(modelName, brand.name, processor, ram, gpu),
-          price: basePrice,
-          originalPrice,
-          imageUrl: pick(LAPTOP_IMAGES, laptopIdx),
-          images: [pick(LAPTOP_IMAGES, laptopIdx), pick(LAPTOP_IMAGES, laptopIdx + 1)],
-          rating: rating(),
-          reviewCount: rnd(50, 2000),
-          viewCount: rnd(500, 25000),
-          isFeatured: laptopIdx % 12 === 0,
-          categoryId: laptopCat.id,
-          brandId: brand.id,
-          specifications: {
-            processor,
-            ram,
-            ramType: isApple ? 'Unified Memory' : ram >= 16 ? 'LPDDR5' : 'DDR4',
-            storage,
-            storageType: 'SSD',
-            display: {
-              size: displaySize,
-              resolution: displaySize >= 16 ? '2560x1600' : '1920x1080',
-              refreshRate,
-              panelType: panel,
-            },
-            gpu,
-            battery: {
-              capacity: isApple ? 52.6 : rnd(42, 90),
-              unit: 'Wh',
-              life: batteryLife,
-            },
-            weight: Math.round(weight * 100) / 100,
-            os: isApple ? 'macOS Sonoma' : 'Windows 11 Home',
-            ports: isApple
-              ? ['Thunderbolt 4 x2', 'MagSafe 3', '3.5mm Jack']
-              : ['USB-A 3.2 x2', 'USB-C 3.2', 'HDMI 2.0', '3.5mm Jack', 'SD Card Reader'],
-            gaming: !!isGaming,
-          },
-        });
-
-        laptopIdx++;
-      }
-    }
-  }
-
-  // batch insert
   let laptopCount = 0;
-  for (const p of laptopProducts as any[]) {
-    await prisma.product.upsert({
-      where: { slug: p.slug },
-      update: { price: p.price, imageUrl: p.imageUrl, images: p.images },
-      create: p,
+  for (const p of laptops) {
+    await upsertProduct({
+      slug: p.slug, name: p.name, description: p.description,
+      price: p.price, originalPrice: p.originalPrice,
+      imageUrl: p.imageUrl, rating: p.rating,
+      reviewCount: p.reviewCount, viewCount: p.viewCount,
+      isFeatured: p.isFeatured ?? false,
+      categoryId: catLaptops.id,
+      brandId: B[p.brand],
+      specifications: p.specifications,
     });
     laptopCount++;
   }
-  console.log(`  ✓ ${laptopCount} laptops`);
+  console.log(`✓ ${laptopCount} laptops seeded`);
 
-  // ─────────────────────────────────────────────────────────
-  // PHONES  (~380 products)
-  // ─────────────────────────────────────────────────────────
-  console.log('  Generating phones...');
+  // ══════════════════════════════════════════════════════════════════════════
+  // SMARTPHONES
+  // ══════════════════════════════════════════════════════════════════════════
+  const phones = [
+    // Apple iPhone
+    { slug: 'apple-iphone-15-pro-max', name: 'Apple iPhone 15 Pro Max', brand: 'apple', price: 159900, originalPrice: 164900, rating: 4.8, reviewCount: 4210, viewCount: 65000, isFeatured: true,
+      imageUrl: 'https://images.unsplash.com/photo-1695048133142-1a20484d2569?w=600',
+      description: 'iPhone 15 Pro Max with A17 Pro chip, titanium design, 48MP main camera with 5x optical zoom, Action Button, and USB-C with USB 3 speeds.',
+      specifications: { processor: 'Apple A17 Pro', ram: 8, storage: 256, display: { size: 6.7, resolution: '2796x1290', refreshRate: 120, type: 'Super Retina XDR ProMotion' }, camera: { main: 48, front: 12, ultraWide: 12, telephoto: 12 }, battery: { capacity: 4422, charging: 27 }, os: 'iOS 17', network: ['5G'] } },
 
-  const phoneProducts: object[] = [];
-  let phoneIdx = 0;
+    { slug: 'apple-iphone-15', name: 'Apple iPhone 15', brand: 'apple', price: 79900, originalPrice: 84900, rating: 4.7, reviewCount: 3180, viewCount: 48000, isFeatured: true,
+      imageUrl: 'https://images.unsplash.com/photo-1695048132069-8d8b0e39ad72?w=600',
+      description: 'iPhone 15 with Dynamic Island, A16 Bionic chip, 48MP camera system, USB-C connector, and all-day battery life. The perfect everyday iPhone.',
+      specifications: { processor: 'Apple A16 Bionic', ram: 6, storage: 128, display: { size: 6.1, resolution: '2556x1179', refreshRate: 60, type: 'Super Retina XDR' }, camera: { main: 48, front: 12, ultraWide: 12 }, battery: { capacity: 3349, charging: 20 }, os: 'iOS 17', network: ['5G'] } },
 
-  for (const brandDef of PHONE_BRANDS) {
-    const brand = brandMap[brandDef.slug];
-    for (const modelName of brandDef.names) {
-      const isApple = brandDef.slug === 'apple';
-      const ramVariants = isApple ? [6, 8] : [4, 6, 8, 12];
+    { slug: 'apple-iphone-14-plus', name: 'Apple iPhone 14 Plus', brand: 'apple', price: 69900, originalPrice: 79900, rating: 4.6, reviewCount: 1840, viewCount: 28000,
+      imageUrl: 'https://images.unsplash.com/photo-1664478546384-d57ffe74a78c?w=600',
+      description: 'iPhone 14 Plus with 6.7-inch Super Retina XDR display, A15 Bionic chip, 26-hour video playback, and 48MP camera. Best value big-screen iPhone.',
+      specifications: { processor: 'Apple A15 Bionic', ram: 6, storage: 128, display: { size: 6.7, resolution: '2778x1284', refreshRate: 60, type: 'Super Retina XDR' }, camera: { main: 12, front: 12, ultraWide: 12 }, battery: { capacity: 4325, charging: 20 }, os: 'iOS 17', network: ['5G'] } },
 
-      for (const ram of ramVariants) {
-        const processor = isApple
-          ? (modelName.includes('Pro') ? 'Apple A17 Pro' : modelName.includes('15') ? 'Apple A16 Bionic' : 'Apple A15 Bionic')
-          : PHONE_PROCESSORS[phoneIdx % (PHONE_PROCESSORS.length - 3)];
+    // Samsung
+    { slug: 'samsung-galaxy-s24-ultra', name: 'Samsung Galaxy S24 Ultra', brand: 'samsung', price: 134999, originalPrice: 144999, rating: 4.8, reviewCount: 2840, viewCount: 42000, isFeatured: true,
+      imageUrl: 'https://images.unsplash.com/photo-1706874894878-a1d37741781e?w=600',
+      description: 'Galaxy S24 Ultra with Snapdragon 8 Gen 3, built-in S Pen, 200MP camera, 12GB RAM, and 5000mAh battery. The ultimate Android flagship.',
+      specifications: { processor: 'Snapdragon 8 Gen 3', ram: 12, storage: 256, display: { size: 6.8, resolution: '3088x1440', refreshRate: 120, type: 'Dynamic AMOLED 2X' }, camera: { main: 200, front: 12, ultraWide: 12, telephoto: 10 }, battery: { capacity: 5000, charging: 45 }, os: 'Android 14', network: ['5G'] } },
 
-        const isflagship = modelName.match(/Ultra|Pro|S24|S23|Fold|Flip|Open|OnePlus 1[12]|Pixel [78] Pro|Xperia 1/i);
-        const mainCamera = isApple
-          ? (modelName.includes('Pro') ? 48 : 12)
-          : isflagship ? rnd(5, 7) * 10 : rnd(4, 6) * 10;
-        const storage = isApple ? (ram === 6 ? 128 : 256) : [128, 256][phoneIdx % 2];
-        const battery = isApple ? 3877 : isflagship ? rnd(4400, 5000, 100) : rnd(4000, 5000, 100);
+    { slug: 'samsung-galaxy-s24-plus', name: 'Samsung Galaxy S24+', brand: 'samsung', price: 99999, originalPrice: 109999, rating: 4.7, reviewCount: 1620, viewCount: 26000, isFeatured: true,
+      imageUrl: 'https://images.unsplash.com/photo-1610945415295-d9bbf067e59c?w=600',
+      description: 'Galaxy S24+ with Snapdragon 8 Gen 3, 50MP triple camera, 6.7-inch Dynamic AMOLED 2X, 4900mAh battery, and Galaxy AI features.',
+      specifications: { processor: 'Snapdragon 8 Gen 3', ram: 12, storage: 256, display: { size: 6.7, resolution: '3088x1440', refreshRate: 120, type: 'Dynamic AMOLED 2X' }, camera: { main: 50, front: 12, ultraWide: 12, telephoto: 10 }, battery: { capacity: 4900, charging: 45 }, os: 'Android 14', network: ['5G'] } },
 
-        const basePrice = isApple
-          ? rnd(59900, 134900, 1000)
-          : isflagship
-          ? rnd(45000, 159900, 500)
-          : rnd(10000, 44000, 500);
-        const originalPrice = Math.round(basePrice * (1 + rnd(5, 15) / 100) / 500) * 500;
+    { slug: 'samsung-galaxy-s24', name: 'Samsung Galaxy S24', brand: 'samsung', price: 74999, originalPrice: 79999, rating: 4.6, reviewCount: 2180, viewCount: 34000, isFeatured: true,
+      imageUrl: 'https://images.unsplash.com/photo-1543081965-f3b6b9c21286?w=600',
+      description: 'Galaxy S24 with Snapdragon 8 Gen 3, Galaxy AI, 50MP camera, 6.2-inch Dynamic AMOLED, and 7 years of OS updates. The best compact Android.',
+      specifications: { processor: 'Snapdragon 8 Gen 3', ram: 8, storage: 256, display: { size: 6.2, resolution: '2340x1080', refreshRate: 120, type: 'Dynamic AMOLED 2X' }, camera: { main: 50, front: 12, ultraWide: 12, telephoto: 10 }, battery: { capacity: 4000, charging: 25 }, os: 'Android 14', network: ['5G'] } },
 
-        const slug = `${slugify(brandDef.slug + '-' + modelName)}-${ram}gb-${storage}gb-${phoneIdx}`;
+    { slug: 'samsung-galaxy-a55-5g', name: 'Samsung Galaxy A55 5G', brand: 'samsung', price: 38999, originalPrice: 43999, rating: 4.4, reviewCount: 1840, viewCount: 28000,
+      imageUrl: 'https://images.unsplash.com/photo-1574944985070-8f3ebc6b79d2?w=600',
+      description: 'Galaxy A55 5G with Exynos 1480, 50MP OIS camera, 6.6-inch Super AMOLED 120Hz, IP67 rating, and 5000mAh battery. Best mid-range Samsung.',
+      specifications: { processor: 'Exynos 1480', ram: 8, storage: 256, display: { size: 6.6, resolution: '2340x1080', refreshRate: 120, type: 'Super AMOLED' }, camera: { main: 50, front: 32, ultraWide: 12 }, battery: { capacity: 5000, charging: 25 }, os: 'Android 14', network: ['5G'] } },
 
-        phoneProducts.push({
-          name: `${brand.name} ${modelName} (${ram}GB)`,
-          slug,
-          description: phoneDesc(modelName, brand.name, processor, ram, mainCamera),
-          price: basePrice,
-          originalPrice,
-          imageUrl: pick(PHONE_IMAGES, phoneIdx),
-          images: [pick(PHONE_IMAGES, phoneIdx), pick(PHONE_IMAGES, phoneIdx + 1)],
-          rating: rating(),
-          reviewCount: rnd(80, 5000),
-          viewCount: rnd(1000, 40000),
-          isFeatured: phoneIdx % 10 === 0,
-          categoryId: phoneCat.id,
-          brandId: brand.id,
-          specifications: {
-            processor,
-            ram,
-            storage,
-            display: {
-              size: isApple ? 6.1 : rnd(60, 68) / 10,
-              resolution: '2400x1080',
-              refreshRate: isApple || isflagship ? 120 : 90,
-              type: isApple ? 'Super Retina XDR OLED' : 'AMOLED',
-            },
-            camera: {
-              main: mainCamera,
-              front: isApple ? 12 : 16,
-              ultraWide: isApple ? 12 : mainCamera >= 50 ? 12 : null,
-              telephoto: isApple && modelName.includes('Pro') ? 12 : null,
-            },
-            battery: {
-              capacity: battery,
-              charging: isApple ? 20 : isflagship ? rnd(50, 100, 5) : rnd(18, 45, 9),
-            },
-            os: isApple ? `iOS ${modelName.includes('15') ? 17 : 16}` : 'Android 14',
-            network: ram >= 6 || isApple ? ['5G', 'Wi-Fi 6', 'Bluetooth 5.3'] : ['4G LTE', 'Wi-Fi 5', 'Bluetooth 5.1'],
-          },
-        });
+    { slug: 'samsung-galaxy-a35-5g', name: 'Samsung Galaxy A35 5G', brand: 'samsung', price: 26999, originalPrice: 31999, rating: 4.3, reviewCount: 2240, viewCount: 36000,
+      imageUrl: 'https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?w=600',
+      description: 'Galaxy A35 5G with Exynos 1380, 50MP OIS camera, 6.6-inch Super AMOLED, IP67 water resistance, and 5000mAh battery at an accessible price.',
+      specifications: { processor: 'Exynos 1380', ram: 6, storage: 128, display: { size: 6.6, resolution: '2340x1080', refreshRate: 120, type: 'Super AMOLED' }, camera: { main: 50, front: 13, ultraWide: 8 }, battery: { capacity: 5000, charging: 25 }, os: 'Android 14', network: ['5G'] } },
 
-        phoneIdx++;
-      }
-    }
-  }
+    // OnePlus
+    { slug: 'oneplus-12-2024', name: 'OnePlus 12 (2024)', brand: 'oneplus', price: 64999, originalPrice: 69999, rating: 4.7, reviewCount: 1820, viewCount: 28000, isFeatured: true,
+      imageUrl: 'https://images.unsplash.com/photo-1592750475338-74b7b21085ab?w=600',
+      description: 'OnePlus 12 with Snapdragon 8 Gen 3, Hasselblad camera, 50MP triple cameras, 6.82-inch ProXDR 120Hz display, 5400mAh battery, 100W SUPERVOOC charging.',
+      specifications: { processor: 'Snapdragon 8 Gen 3', ram: 12, storage: 256, display: { size: 6.82, resolution: '3168x1440', refreshRate: 120, type: 'LTPO3 AMOLED' }, camera: { main: 50, front: 32, ultraWide: 48, telephoto: 64 }, battery: { capacity: 5400, charging: 100 }, os: 'OxygenOS 14 (Android 14)', network: ['5G'] } },
+
+    { slug: 'oneplus-nord-ce4', name: 'OnePlus Nord CE 4', brand: 'oneplus', price: 24999, originalPrice: 28999, rating: 4.3, reviewCount: 1240, viewCount: 19000,
+      imageUrl: 'https://images.unsplash.com/photo-1580910051074-3eb694886505?w=600',
+      description: 'OnePlus Nord CE 4 with Snapdragon 7 Gen 3, 50MP Sony LYT-600 camera, 6.7-inch FHD+ 120Hz AMOLED, 5500mAh battery, and 100W SUPERVOOC charging.',
+      specifications: { processor: 'Snapdragon 7 Gen 3', ram: 8, storage: 128, display: { size: 6.7, resolution: '2412x1080', refreshRate: 120, type: 'AMOLED' }, camera: { main: 50, front: 16, ultraWide: 8 }, battery: { capacity: 5500, charging: 100 }, os: 'OxygenOS 14 (Android 14)', network: ['5G'] } },
+
+    // Google Pixel
+    { slug: 'google-pixel-8-pro', name: 'Google Pixel 8 Pro', brand: 'google', price: 106999, originalPrice: 114999, rating: 4.7, reviewCount: 980, viewCount: 16000,
+      imageUrl: 'https://images.unsplash.com/photo-1598327105666-5b89351aff97?w=600',
+      description: 'Google Pixel 8 Pro with Tensor G3, 50MP triple cameras, 6.7-inch LTPO OLED 120Hz display, temperature sensor, and 7 years of OS and security updates.',
+      specifications: { processor: 'Google Tensor G3', ram: 12, storage: 128, display: { size: 6.7, resolution: '2992x1344', refreshRate: 120, type: 'LTPO OLED' }, camera: { main: 50, front: 10.5, ultraWide: 48, telephoto: 48 }, battery: { capacity: 5050, charging: 30 }, os: 'Android 14', network: ['5G'] } },
+
+    { slug: 'google-pixel-8a', name: 'Google Pixel 8a', brand: 'google', price: 52999, originalPrice: 59999, rating: 4.6, reviewCount: 820, viewCount: 13000,
+      imageUrl: 'https://images.unsplash.com/photo-1565043666747-69f6646db940?w=600',
+      description: 'Pixel 8a with Tensor G3, 64MP camera, 6.1-inch OLED 120Hz, IP67 water resistance, and 7 years of software updates. Best camera in the mid-range.',
+      specifications: { processor: 'Google Tensor G3', ram: 8, storage: 128, display: { size: 6.1, resolution: '2400x1080', refreshRate: 120, type: 'OLED' }, camera: { main: 64, front: 13, ultraWide: 13 }, battery: { capacity: 4492, charging: 18 }, os: 'Android 14', network: ['5G'] } },
+
+    // Xiaomi
+    { slug: 'xiaomi-14-ultra', name: 'Xiaomi 14 Ultra', brand: 'xiaomi', price: 99999, originalPrice: 109999, rating: 4.7, reviewCount: 640, viewCount: 12000,
+      imageUrl: 'https://images.unsplash.com/photo-1551816230-ef5deaed4a26?w=600',
+      description: 'Xiaomi 14 Ultra with Snapdragon 8 Gen 3, Leica quad-camera with 1-inch sensor, 50MP x4 cameras, 6.73-inch 120Hz LTPO OLED, 5000mAh 90W battery.',
+      specifications: { processor: 'Snapdragon 8 Gen 3', ram: 16, storage: 512, display: { size: 6.73, resolution: '3200x1440', refreshRate: 120, type: 'LTPO AMOLED' }, camera: { main: 50, front: 32, ultraWide: 50, telephoto: 50 }, battery: { capacity: 5000, charging: 90 }, os: 'Android 14', network: ['5G'] } },
+
+    { slug: 'xiaomi-redmi-note-13-pro', name: 'Xiaomi Redmi Note 13 Pro+', brand: 'xiaomi', price: 31999, originalPrice: 37999, rating: 4.4, reviewCount: 2840, viewCount: 44000,
+      imageUrl: 'https://images.unsplash.com/photo-1632635173428-7e37b1fbd8c7?w=600',
+      description: 'Redmi Note 13 Pro+ with Dimensity 7200 Ultra, 200MP camera, 6.67-inch curved AMOLED 120Hz, IP68 waterproof, 120W HyperCharge, 5000mAh battery.',
+      specifications: { processor: 'MediaTek Dimensity 7200 Ultra', ram: 8, storage: 256, display: { size: 6.67, resolution: '2712x1220', refreshRate: 120, type: 'Curved AMOLED' }, camera: { main: 200, front: 16, ultraWide: 8 }, battery: { capacity: 5000, charging: 120 }, os: 'Android 13', network: ['5G'] } },
+
+    // Motorola
+    { slug: 'motorola-edge-50-pro', name: 'Motorola Edge 50 Pro', brand: 'motorola', price: 31999, originalPrice: 37999, rating: 4.3, reviewCount: 920, viewCount: 15000,
+      imageUrl: 'https://images.unsplash.com/photo-1571607388263-1044f9ea01dd?w=600',
+      description: 'Motorola Edge 50 Pro with Snapdragon 7 Gen 3, 50MP OIS triple camera, 6.7-inch pOLED 144Hz curved display, IP68, 125W TurboPower charging.',
+      specifications: { processor: 'Snapdragon 7 Gen 3', ram: 12, storage: 256, display: { size: 6.7, resolution: '2712x1220', refreshRate: 144, type: 'pOLED Curved' }, camera: { main: 50, front: 50, ultraWide: 13, telephoto: 10 }, battery: { capacity: 4500, charging: 125 }, os: 'Android 14', network: ['5G'] } },
+
+    { slug: 'motorola-moto-g84-5g', name: 'Motorola Moto G84 5G', brand: 'motorola', price: 17999, originalPrice: 21999, rating: 4.2, reviewCount: 1680, viewCount: 26000,
+      imageUrl: 'https://images.unsplash.com/photo-1585060544812-6b45742d762f?w=600',
+      description: 'Motorola Moto G84 with Snapdragon 695, 50MP OIS camera, 6.55-inch pOLED 120Hz display, 5000mAh battery, and IP54 splash resistance.',
+      specifications: { processor: 'Snapdragon 695', ram: 12, storage: 256, display: { size: 6.55, resolution: '2400x1080', refreshRate: 120, type: 'pOLED' }, camera: { main: 50, front: 16, ultraWide: 8 }, battery: { capacity: 5000, charging: 33 }, os: 'Android 13', network: ['5G'] } },
+
+    // realme
+    { slug: 'realme-gt-6', name: 'realme GT 6', brand: 'realme', price: 39999, originalPrice: 45999, rating: 4.4, reviewCount: 1020, viewCount: 17000,
+      imageUrl: 'https://images.unsplash.com/photo-1567581935884-3349723552ca?w=600',
+      description: 'realme GT 6 with Snapdragon 8s Gen 3, 50MP Sony LYT-808 camera, 6.78-inch 120Hz AMOLED, 5500mAh battery, 120W SUPERVOOC charging.',
+      specifications: { processor: 'Snapdragon 8s Gen 3', ram: 12, storage: 256, display: { size: 6.78, resolution: '2780x1264', refreshRate: 120, type: 'AMOLED' }, camera: { main: 50, front: 32, ultraWide: 8 }, battery: { capacity: 5500, charging: 120 }, os: 'Android 14', network: ['5G'] } },
+
+    { slug: 'realme-narzo-70-pro', name: 'realme Narzo 70 Pro 5G', brand: 'realme', price: 19999, originalPrice: 23999, rating: 4.2, reviewCount: 1840, viewCount: 29000,
+      imageUrl: 'https://images.unsplash.com/photo-1601784551446-20c9e07cdbdb?w=600',
+      description: 'realme Narzo 70 Pro 5G with Dimensity 7050, 50MP Sony camera, 6.67-inch AMOLED 120Hz, 5000mAh battery, and 45W fast charging.',
+      specifications: { processor: 'MediaTek Dimensity 7050', ram: 8, storage: 128, display: { size: 6.67, resolution: '2400x1080', refreshRate: 120, type: 'AMOLED' }, camera: { main: 50, front: 16 }, battery: { capacity: 5000, charging: 45 }, os: 'Android 14', network: ['5G'] } },
+  ];
 
   let phoneCount = 0;
-  for (const p of phoneProducts as any[]) {
-    await prisma.product.upsert({
-      where: { slug: p.slug },
-      update: { price: p.price, imageUrl: p.imageUrl, images: p.images },
-      create: p,
+  for (const p of phones) {
+    await upsertProduct({
+      slug: p.slug, name: p.name, description: p.description,
+      price: p.price, originalPrice: p.originalPrice,
+      imageUrl: p.imageUrl, rating: p.rating,
+      reviewCount: p.reviewCount, viewCount: p.viewCount,
+      isFeatured: p.isFeatured ?? false,
+      categoryId: catPhones.id,
+      brandId: B[p.brand],
+      specifications: p.specifications,
     });
     phoneCount++;
   }
-  console.log(`  ✓ ${phoneCount} phones`);
+  console.log(`✓ ${phoneCount} smartphones seeded`);
 
-  // ─────────────────────────────────────────────────────────
-  // HEADPHONES  (~320 products)
-  // ─────────────────────────────────────────────────────────
-  console.log('  Generating headphones...');
+  // ══════════════════════════════════════════════════════════════════════════
+  // HEADPHONES & EARBUDS
+  // ══════════════════════════════════════════════════════════════════════════
+  const headphones = [
+    { slug: 'sony-wh-1000xm5', name: 'Sony WH-1000XM5', brand: 'sony', price: 26990, originalPrice: 34990, rating: 4.8, reviewCount: 4820, viewCount: 68000, isFeatured: true,
+      imageUrl: 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=600',
+      description: 'Sony WH-1000XM5 with industry-leading noise cancellation, 30-hour battery, Multipoint connection, speak-to-chat, and crystal-clear call quality.',
+      specifications: { type: 'Over-Ear', noiseCancellation: true, wirelessRange: 30, batteryLife: 30, charging: 'USB-C', foldable: false, drivers: '30mm', frequency: '4Hz–40kHz', weight: 250, connectivity: ['Bluetooth 5.2', '3.5mm Jack'] } },
 
-  const headphoneList: object[] = [];
-  let hpIdx = 0;
+    { slug: 'sony-wf-1000xm5', name: 'Sony WF-1000XM5 Earbuds', brand: 'sony', price: 19990, originalPrice: 24990, rating: 4.7, reviewCount: 2840, viewCount: 42000, isFeatured: true,
+      imageUrl: 'https://images.unsplash.com/photo-1572536147248-ac59a8abfa4b?w=600',
+      description: 'Sony WF-1000XM5 true wireless earbuds with best-in-class noise cancellation, 8-hour battery (24h with case), Multipoint, and premium sound quality.',
+      specifications: { type: 'TWS Earbuds', noiseCancellation: true, batteryLife: 8, caseBattery: 24, charging: 'USB-C', weight: 5.9, connectivity: ['Bluetooth 5.3'], ipRating: 'IPX4' } },
 
-  // Sony, Samsung, Apple (already in brandMap)
-  for (const brandDef of HEADPHONE_BRANDS) {
-    const brand = brandMap[brandDef.slug];
-    for (const modelName of brandDef.names) {
-      const isApple = brandDef.slug === 'apple';
-      const isTWS = modelName.match(/Buds|Pods|WF-|Airdopes|Shots|Air Buds/i) ? 'TWS' : 'Over-Ear';
-      const hasAnc = modelName.match(/Pro|XM4|XM5|1000X|QuietComfort|QC|ANC|NC|Max/i) ? true : false;
-      const battery = isTWS === 'TWS' ? rnd(20, 36) : rnd(20, 40);
+    { slug: 'apple-airpods-pro-2', name: 'Apple AirPods Pro (2nd Gen)', brand: 'apple', price: 26900, originalPrice: 27900, rating: 4.8, reviewCount: 6240, viewCount: 84000, isFeatured: true,
+      imageUrl: 'https://images.unsplash.com/photo-1600294037681-c80b4cb5b434?w=600',
+      description: 'AirPods Pro 2 with H2 chip, Adaptive Transparency, Personalized Spatial Audio, 6-hour battery (30h with case), and MagSafe USB-C charging case.',
+      specifications: { type: 'TWS Earbuds', noiseCancellation: true, batteryLife: 6, caseBattery: 30, charging: 'USB-C / MagSafe', connectivity: ['Bluetooth 5.3'], ipRating: 'IP54', weight: 5.3 } },
 
-      const basePrice = isApple
-        ? (modelName.includes('Max') ? 59900 : modelName.includes('Pro') ? 24900 : 14900)
-        : brandDef.slug === 'sony' && modelName.includes('1000XM')
-        ? rnd(22000, 35000, 500)
-        : rnd(3000, 20000, 500);
-      const originalPrice = Math.round(basePrice * (1 + rnd(5, 25) / 100) / 500) * 500;
+    { slug: 'samsung-galaxy-buds3-pro', name: 'Samsung Galaxy Buds3 Pro', brand: 'samsung', price: 17999, originalPrice: 19999, rating: 4.5, reviewCount: 1240, viewCount: 19000,
+      imageUrl: 'https://images.unsplash.com/photo-1590658268037-6bf12165a8df?w=600',
+      description: 'Galaxy Buds3 Pro with Intelligent ANC, 360 Audio, 6-hour battery (30h with case), IP57 rating, and seamless Galaxy ecosystem integration.',
+      specifications: { type: 'TWS Earbuds', noiseCancellation: true, batteryLife: 6, caseBattery: 30, charging: 'USB-C', connectivity: ['Bluetooth 5.4'], ipRating: 'IP57', weight: 5.5 } },
 
-      const slug = `${slugify(brandDef.slug + '-' + modelName)}-${hpIdx}`;
+    { slug: 'boat-airdopes-141', name: 'boAt Airdopes 141', brand: 'boat', price: 1299, originalPrice: 2999, rating: 4.1, reviewCount: 28400, viewCount: 380000,
+      imageUrl: 'https://images.unsplash.com/photo-1608043152269-423dbba4e7e1?w=600',
+      description: 'boAt Airdopes 141 with 8mm drivers, ENx Environmental Noise Cancellation, 42-hour total playback, ASAP Charge, and IWR technology.',
+      specifications: { type: 'TWS Earbuds', noiseCancellation: false, batteryLife: 8, caseBattery: 42, charging: 'USB-C', connectivity: ['Bluetooth 5.3'], ipRating: 'IPX4', weight: 4.5 } },
 
-      headphoneList.push({
-        name: `${brand.name} ${modelName}`,
-        slug,
-        description: headphoneDesc(modelName, brand.name, isTWS, hasAnc, battery),
-        price: basePrice,
-        originalPrice,
-        imageUrl: pick(HEADPHONE_IMAGES, hpIdx),
-        images: [pick(HEADPHONE_IMAGES, hpIdx), pick(HEADPHONE_IMAGES, hpIdx + 1)],
-        rating: rating(),
-        reviewCount: rnd(100, 6000),
-        viewCount: rnd(1000, 35000),
-        isFeatured: hpIdx % 8 === 0,
-        categoryId: headphoneCat.id,
-        brandId: brand.id,
-        specifications: {
-          type: isTWS,
-          connectivity: 'Bluetooth 5.3',
-          anc: hasAnc,
-          driver: isTWS === 'TWS' ? '10mm dynamic' : '40mm dynamic',
-          frequency: '20Hz – 20kHz',
-          battery: {
-            earbuds: isTWS === 'TWS' ? rnd(6, 10) : null,
-            case: isTWS === 'TWS' ? rnd(24, 30) : null,
-            total: battery,
-            chargingTime: 1.5,
-          },
-          microphone: true,
-          ipRating: isTWS === 'TWS' ? 'IPX4' : null,
-          weight: isTWS === 'TWS' ? rnd(4, 7) : rnd(200, 350),
-          foldable: isTWS !== 'TWS',
-          multiDevice: brandDef.slug !== 'boat',
-        },
-      });
-      hpIdx++;
-    }
-  }
+    { slug: 'boat-rockerz-550', name: 'boAt Rockerz 550', brand: 'boat', price: 1799, originalPrice: 3990, rating: 4.0, reviewCount: 18400, viewCount: 240000,
+      imageUrl: 'https://images.unsplash.com/photo-1545127398-14699f92334b?w=600',
+      description: 'boAt Rockerz 550 over-ear headphone with 40mm dynamic drivers, 20-hour battery, foldable design, and super-soft cushions. Best value over-ear in India.',
+      specifications: { type: 'Over-Ear', noiseCancellation: false, wirelessRange: 10, batteryLife: 20, charging: 'Micro-USB', foldable: true, drivers: '40mm', weight: 235, connectivity: ['Bluetooth 5.0', '3.5mm Jack'] } },
 
-  // Extra headphone brands
-  for (const extra of EXTRA_HP_BRANDS) {
-    let brand = brandMap[extra.slug];
-    if (!brand) {
-      brand = await prisma.brand.upsert({
-        where: { slug: extra.slug },
-        update: {},
-        create: { name: extra.name, slug: extra.slug },
-      });
-      brandMap[extra.slug] = brand;
-    }
+    { slug: 'noise-buds-vs104', name: 'Noise Buds VS104', brand: 'noise', price: 1299, originalPrice: 2999, rating: 4.0, reviewCount: 12400, viewCount: 180000,
+      imageUrl: 'https://images.unsplash.com/photo-1573497019940-1c28c88b4f3e?w=600',
+      description: 'Noise Buds VS104 with 13mm drivers, Quad Mic ENC, 40-hour total playback, Type-C fast charging, and IHyper sync technology for instant pairing.',
+      specifications: { type: 'TWS Earbuds', noiseCancellation: false, batteryLife: 10, caseBattery: 40, charging: 'USB-C', connectivity: ['Bluetooth 5.3'], ipRating: 'IPX4' } },
 
-    const models = EXTRA_HP_MODELS[extra.slug] ?? [];
-    for (const modelName of models) {
-      const isTWS = modelName.match(/Buds|Airdopes|Shots|Air Buds|Wave|Free|Tune.*Earb|WF|Earbuds/i) ? 'TWS' : 'Over-Ear';
-      const hasAnc = modelName.match(/ANC|NC|Quiet|XM|Pro|Momentum 4|Plus|Ultra/i) ? true : false;
-      const battery = isTWS === 'TWS' ? rnd(18, 36) : rnd(20, 50);
+    { slug: 'noise-one-anc', name: 'Noise One ANC Headphones', brand: 'noise', price: 2499, originalPrice: 4999, rating: 4.1, reviewCount: 6840, viewCount: 92000,
+      imageUrl: 'https://images.unsplash.com/photo-1487215078519-e21cc028cb29?w=600',
+      description: 'Noise One ANC over-ear with Active Noise Cancellation, 35-hour battery, 40mm MEMS drivers, foldable design, and Hyper Sync instant pairing.',
+      specifications: { type: 'Over-Ear', noiseCancellation: true, wirelessRange: 10, batteryLife: 35, charging: 'USB-C', foldable: true, drivers: '40mm', connectivity: ['Bluetooth 5.3', '3.5mm Jack'] } },
 
-      const priceMap: Record<string, number> = {
-        bose: rnd(15000, 35000, 500),
-        sennheiser: rnd(12000, 30000, 500),
-        jbl: rnd(2500, 15000, 500),
-        boat: rnd(800, 5000, 200),
-        noise: rnd(800, 4000, 200),
-        realme: rnd(700, 3500, 200),
-      };
-      const basePrice = priceMap[extra.slug] ?? rnd(1000, 10000, 500);
-      const originalPrice = Math.round(basePrice * (1 + rnd(5, 30) / 100) / 200) * 200;
+    { slug: 'oneplus-buds-3', name: 'OnePlus Buds 3', brand: 'oneplus', price: 4999, originalPrice: 6499, rating: 4.4, reviewCount: 2840, viewCount: 42000,
+      imageUrl: 'https://images.unsplash.com/photo-1629367494173-c78a56567877?w=600',
+      description: 'OnePlus Buds 3 with 49dB Active Noise Cancellation, LHDC 5.0 codec, 44-hour total battery, 10-min fast charge = 7-hour playback, IP55 rating.',
+      specifications: { type: 'TWS Earbuds', noiseCancellation: true, batteryLife: 9, caseBattery: 44, charging: 'USB-C', connectivity: ['Bluetooth 5.3'], ipRating: 'IP55', weight: 4.6 } },
 
-      const slug = `${slugify(extra.slug + '-' + modelName)}-${hpIdx}`;
+    { slug: 'realme-buds-air-6-pro', name: 'realme Buds Air 6 Pro', brand: 'realme', price: 2999, originalPrice: 4999, rating: 4.3, reviewCount: 3840, viewCount: 54000,
+      imageUrl: 'https://images.unsplash.com/photo-1628253747716-0c4f5c90fdda?w=600',
+      description: 'realme Buds Air 6 Pro with 50dB ANC, 10mm Titanium drivers, 38-hour total battery, LDAC support, IP55 rating, and 360 Spatial Audio.',
+      specifications: { type: 'TWS Earbuds', noiseCancellation: true, batteryLife: 9, caseBattery: 38, charging: 'USB-C', connectivity: ['Bluetooth 5.4'], ipRating: 'IP55' } },
 
-      headphoneList.push({
-        name: `${extra.name} ${modelName}`,
-        slug,
-        description: headphoneDesc(modelName, extra.name, isTWS, hasAnc, battery),
-        price: basePrice,
-        originalPrice,
-        imageUrl: pick(HEADPHONE_IMAGES, hpIdx),
-        images: [pick(HEADPHONE_IMAGES, hpIdx), pick(HEADPHONE_IMAGES, hpIdx + 1)],
-        rating: rating(),
-        reviewCount: rnd(50, 8000),
-        viewCount: rnd(500, 30000),
-        isFeatured: hpIdx % 9 === 0,
-        categoryId: headphoneCat.id,
-        brandId: brand.id,
-        specifications: {
-          type: isTWS,
-          connectivity: 'Bluetooth 5.3',
-          anc: hasAnc,
-          driver: isTWS === 'TWS' ? '10mm dynamic' : '40mm dynamic',
-          frequency: '20Hz – 20kHz',
-          battery: {
-            earbuds: isTWS === 'TWS' ? rnd(6, 10) : null,
-            case: isTWS === 'TWS' ? rnd(20, 30) : null,
-            total: battery,
-            chargingTime: isTWS === 'TWS' ? 1 : 2,
-          },
-          microphone: true,
-          ipRating: isTWS === 'TWS' ? 'IPX4' : null,
-          weight: isTWS === 'TWS' ? rnd(4, 8) : rnd(180, 320),
-          foldable: isTWS !== 'TWS',
-          multiDevice: extra.slug !== 'boat',
-        },
-      });
-      hpIdx++;
-    }
-  }
+    { slug: 'samsung-galaxy-buds-fe', name: 'Samsung Galaxy Buds FE', brand: 'samsung', price: 7999, originalPrice: 9999, rating: 4.3, reviewCount: 1840, viewCount: 27000,
+      imageUrl: 'https://images.unsplash.com/photo-1615655406736-b37892f1f12e?w=600',
+      description: 'Samsung Galaxy Buds FE with Active Noise Cancellation, 21-hour total battery, 11mm driver, Comfort Fit design, and seamless Galaxy integration.',
+      specifications: { type: 'TWS Earbuds', noiseCancellation: true, batteryLife: 6, caseBattery: 21, charging: 'USB-C', connectivity: ['Bluetooth 5.2'], ipRating: 'IPX2' } },
+
+    { slug: 'xiaomi-redmi-buds-5-pro', name: 'Xiaomi Redmi Buds 5 Pro', brand: 'xiaomi', price: 4999, originalPrice: 6999, rating: 4.4, reviewCount: 2140, viewCount: 32000,
+      imageUrl: 'https://images.unsplash.com/photo-1625236641344-45f0e65c8765?w=600',
+      description: 'Redmi Buds 5 Pro with 52dB ANC, 11mm LCP drivers, 38-hour total battery, Hi-Res Audio wireless certification, and IP54 rating.',
+      specifications: { type: 'TWS Earbuds', noiseCancellation: true, batteryLife: 10, caseBattery: 38, charging: 'USB-C', connectivity: ['Bluetooth 5.4'], ipRating: 'IP54' } },
+  ];
 
   let hpCount = 0;
-  for (const p of headphoneList as any[]) {
-    await prisma.product.upsert({
-      where: { slug: p.slug },
-      update: { price: p.price, imageUrl: p.imageUrl, images: p.images },
-      create: p,
+  for (const p of headphones) {
+    await upsertProduct({
+      slug: p.slug, name: p.name, description: p.description,
+      price: p.price, originalPrice: p.originalPrice,
+      imageUrl: p.imageUrl, rating: p.rating,
+      reviewCount: p.reviewCount, viewCount: p.viewCount,
+      isFeatured: p.isFeatured ?? false,
+      categoryId: catHeadphones.id,
+      brandId: B[p.brand],
+      specifications: p.specifications,
     });
     hpCount++;
   }
-  console.log(`  ✓ ${hpCount} headphones`);
+  console.log(`✓ ${hpCount} headphones/earbuds seeded`);
 
-  // ── Users ─────────────────────────────────────────────────
+  // ══════════════════════════════════════════════════════════════════════════
+  // POWER BANKS
+  // ══════════════════════════════════════════════════════════════════════════
+  const powerBanks = [
+    { slug: 'anker-prime-27650mah', name: 'Anker Prime 27650mAh Power Bank', brand: 'anker', price: 12999, originalPrice: 14999, rating: 4.7, reviewCount: 1240, viewCount: 18000, isFeatured: true,
+      imageUrl: 'https://images.unsplash.com/photo-1609592806596-b60193e37754?w=600',
+      description: 'Anker Prime 27650mAh with 250W total output, 140W USB-C input, Anker App control, charges MacBook Pro in 1.5 hours, and charges 3 devices simultaneously.',
+      specifications: { capacity: 27650, unit: 'mAh', ports: ['USB-C 140W', 'USB-C 100W', 'USB-A 22.5W'], maxOutput: 250, maxInput: 140, wirelessCharging: false, weight: 625, size: 'Large', passThrough: true } },
+
+    { slug: 'anker-powercore-20100', name: 'Anker PowerCore 20100mAh', brand: 'anker', price: 3999, originalPrice: 5999, rating: 4.6, reviewCount: 8240, viewCount: 120000,
+      imageUrl: 'https://images.unsplash.com/photo-1585771724684-38269d6639fd?w=600',
+      description: 'Anker PowerCore 20100 with 20100mAh capacity, dual USB-A ports, PowerIQ 2.0, charges iPhone 6+ times or iPad mini 5+ times.',
+      specifications: { capacity: 20100, unit: 'mAh', ports: ['USB-A x2'], maxOutput: 15, maxInput: 15, wirelessCharging: false, weight: 356, size: 'Medium', passThrough: false } },
+
+    { slug: 'anker-327-20000mah', name: 'Anker 327 Power Bank 20000mAh', brand: 'anker', price: 2499, originalPrice: 3499, rating: 4.5, reviewCount: 4820, viewCount: 72000,
+      imageUrl: 'https://images.unsplash.com/photo-1583394838336-acd977736f90?w=600',
+      description: 'Anker 327 Power Bank 20000mAh with USB-C 20W input/output, dual USB-A, trickle-charging mode for earbuds, and slim compact design.',
+      specifications: { capacity: 20000, unit: 'mAh', ports: ['USB-C 20W', 'USB-A x2'], maxOutput: 20, maxInput: 20, wirelessCharging: false, weight: 440, size: 'Medium', passThrough: true } },
+
+    { slug: 'boat-power-bank-10000', name: 'boAt Energy 10000mAh Power Bank', brand: 'boat', price: 999, originalPrice: 2499, rating: 4.1, reviewCount: 24800, viewCount: 380000,
+      imageUrl: 'https://images.unsplash.com/photo-1618477461853-cf6ed80faba5?w=600',
+      description: 'boAt Energy 10000mAh with 22.5W fast charging, dual USB-A output, Type-C input, LED indicator, and ultra-compact design.',
+      specifications: { capacity: 10000, unit: 'mAh', ports: ['USB-A x2', 'USB-C'], maxOutput: 22.5, maxInput: 22.5, wirelessCharging: false, weight: 220, size: 'Compact', passThrough: false } },
+
+    { slug: 'xiaomi-33w-10000-power-bank', name: 'Xiaomi 33W Power Bank 10000mAh', brand: 'xiaomi', price: 1299, originalPrice: 1999, rating: 4.3, reviewCount: 18400, viewCount: 280000,
+      imageUrl: 'https://images.unsplash.com/photo-1609592806596-b60193e37754?w=600',
+      description: 'Xiaomi 33W Power Bank 10000mAh with dual USB-A and USB-C ports, 33W fast charging, LED indicator, and pocket-friendly slim design.',
+      specifications: { capacity: 10000, unit: 'mAh', ports: ['USB-A 33W', 'USB-A 22.5W', 'USB-C 33W'], maxOutput: 33, maxInput: 33, wirelessCharging: false, weight: 235, size: 'Compact', passThrough: false } },
+
+    { slug: 'realme-150w-12000-power-bank', name: 'realme 150W Power Bank 12000mAh', brand: 'realme', price: 2499, originalPrice: 3999, rating: 4.4, reviewCount: 3840, viewCount: 54000,
+      imageUrl: 'https://images.unsplash.com/photo-1563207153-f403bf289096?w=600',
+      description: 'realme 150W Power Bank with 150W two-way fast charging, 12000mAh, USB-C and USB-A ports. Full charge your phone in just 30 minutes.',
+      specifications: { capacity: 12000, unit: 'mAh', ports: ['USB-C 150W', 'USB-A 30W'], maxOutput: 150, maxInput: 150, wirelessCharging: false, weight: 285, size: 'Medium', passThrough: true } },
+
+    { slug: 'noise-airbell-10000', name: 'Noise AirBell 10000mAh Wireless', brand: 'noise', price: 1799, originalPrice: 2999, rating: 4.0, reviewCount: 4240, viewCount: 62000,
+      imageUrl: 'https://images.unsplash.com/photo-1608228088998-57828365d486?w=600',
+      description: 'Noise AirBell 10000mAh with 15W wireless charging, 22.5W wired fast charging, dual USB output, and LED battery indicator.',
+      specifications: { capacity: 10000, unit: 'mAh', ports: ['USB-A x2', 'USB-C'], maxOutput: 22.5, maxInput: 22.5, wirelessCharging: true, wirelessOutput: 15, weight: 250, size: 'Medium', passThrough: false } },
+
+    { slug: 'samsung-45w-20000-power-bank', name: 'Samsung 45W Power Bank 20000mAh', brand: 'samsung', price: 4999, originalPrice: 6999, rating: 4.5, reviewCount: 2840, viewCount: 42000,
+      imageUrl: 'https://images.unsplash.com/photo-1631281956016-3cdc1b2fe5fb?w=600',
+      description: 'Samsung 45W Super Fast Charging Power Bank 20000mAh with dual USB-C ports, USB-A, wireless charging pad, and premium build quality.',
+      specifications: { capacity: 20000, unit: 'mAh', ports: ['USB-C 45W', 'USB-C 25W', 'USB-A 15W'], maxOutput: 45, maxInput: 45, wirelessCharging: true, wirelessOutput: 10, weight: 398, size: 'Large', passThrough: true } },
+
+    { slug: 'oneplus-150w-10000-power-bank', name: 'OnePlus 150W Power Bank 10000mAh', brand: 'oneplus', price: 2999, originalPrice: 4499, rating: 4.5, reviewCount: 1840, viewCount: 28000,
+      imageUrl: 'https://images.unsplash.com/photo-1600490036275-29b1dd607702?w=600',
+      description: 'OnePlus 150W SUPERVOOC Power Bank 10000mAh with 150W two-way charging, charges OnePlus phones to 50% in 10 minutes, dual USB-C.',
+      specifications: { capacity: 10000, unit: 'mAh', ports: ['USB-C 150W', 'USB-C 65W'], maxOutput: 150, maxInput: 150, wirelessCharging: false, weight: 268, size: 'Compact', passThrough: true } },
+  ];
+
+  let pbCount = 0;
+  for (const p of powerBanks) {
+    await upsertProduct({
+      slug: p.slug, name: p.name, description: p.description,
+      price: p.price, originalPrice: p.originalPrice,
+      imageUrl: p.imageUrl, rating: p.rating,
+      reviewCount: p.reviewCount, viewCount: p.viewCount,
+      isFeatured: p.isFeatured ?? false,
+      categoryId: catPowerBanks.id,
+      brandId: B[p.brand],
+      specifications: p.specifications,
+    });
+    pbCount++;
+  }
+  console.log(`✓ ${pbCount} power banks seeded`);
+
+  // ── Users ──────────────────────────────────────────────────────────────────
   const adminPwd = await bcrypt.hash('Admin@SmartShop123', 12);
-  const admin = await prisma.user.upsert({
+  const demoPwd = await bcrypt.hash('Demo@SmartShop123', 12);
+
+  await prisma.user.upsert({
     where: { email: 'admin@smartshop.dev' },
     update: {},
-    create: {
-      email: 'admin@smartshop.dev',
-      password: adminPwd,
-      firstName: 'Admin',
-      lastName: 'User',
-      role: 'ADMIN',
-    },
+    create: { email: 'admin@smartshop.dev', password: adminPwd, firstName: 'Admin', lastName: 'User', role: 'ADMIN' },
   });
-
-  const demoPwd = await bcrypt.hash('Demo@SmartShop123', 12);
-  const demo = await prisma.user.upsert({
+  await prisma.user.upsert({
     where: { email: 'demo@smartshop.dev' },
     update: {},
-    create: {
-      email: 'demo@smartshop.dev',
-      password: demoPwd,
-      firstName: 'Demo',
-      lastName: 'User',
-      role: 'USER',
-    },
+    create: { email: 'demo@smartshop.dev', password: demoPwd, firstName: 'Demo', lastName: 'User', role: 'USER' },
   });
-  console.log(`✓ Users: ${admin.email}, ${demo.email}`);
+  console.log('✓ Users seeded');
 
-  const total = laptopCount + phoneCount + hpCount;
-  console.log(`\n✅ Seeding complete! ${total} products total`);
-  console.log(`   📦 Laptops:    ${laptopCount}`);
-  console.log(`   📱 Phones:     ${phoneCount}`);
-  console.log(`   🎧 Headphones: ${hpCount}`);
+  const total = laptopCount + phoneCount + hpCount + pbCount;
+  console.log(`\n✅ Seeding complete! ${total} products total.`);
+  console.log(`   Laptops: ${laptopCount} | Phones: ${phoneCount} | Headphones: ${hpCount} | Power Banks: ${pbCount}`);
 }
 
 main()
-  .catch((err) => {
-    console.error('❌ Seed failed:', err);
-    process.exit(1);
-  })
+  .catch((e) => { console.error('❌ Seed failed:', e); process.exit(1); })
   .finally(() => prisma.$disconnect());
