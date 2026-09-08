@@ -45,6 +45,12 @@ __decorate([
     __metadata("design:type", String)
 ], ProductSearchDto.prototype, "brandId", void 0);
 __decorate([
+    (0, swagger_1.ApiPropertyOptional)({ description: 'Brand name filter (e.g. ASUS, Samsung, Apple)' }),
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", String)
+], ProductSearchDto.prototype, "brandName", void 0);
+__decorate([
     (0, swagger_1.ApiPropertyOptional)({ description: 'Minimum price in INR' }),
     (0, class_validator_1.IsOptional)(),
     (0, class_transformer_1.Type)(() => Number),

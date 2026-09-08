@@ -29,7 +29,7 @@ let SearchService = class SearchService {
         this.logger = new logger_service_1.AppLogger('SearchService');
     }
     async searchProducts(dto) {
-        const { query, categoryId, categorySlug, brandId, minPrice, maxPrice, page = 1, limit = 20, } = dto;
+        const { query, categoryId, categorySlug, brandId, brandName, minPrice, maxPrice, page = 1, limit = 20, } = dto;
         const where = { isActive: true };
         if (categoryId) {
             where.categoryId = categoryId;
@@ -44,8 +44,13 @@ let SearchService = class SearchService {
                 this.logger.debug(`Auto-detected category: ${detectedSlug} from query: "${query}"`);
             }
         }
-        if (brandId)
+        if (brandId) {
             where.brandId = brandId;
+        }
+        else if (brandName) {
+            where.brand = { name: { contains: brandName, mode: 'insensitive' } };
+            this.logger.debug(`Brand filter: "${brandName}"`);
+        }
         if (minPrice !== undefined || maxPrice !== undefined) {
             where.price = {};
             if (minPrice !== undefined)

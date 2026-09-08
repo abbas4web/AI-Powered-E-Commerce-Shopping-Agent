@@ -3,6 +3,7 @@ export declare class ProductSearchDto {
     categoryId?: string;
     categorySlug?: string;
     brandId?: string;
+    brandName?: string;
     minPrice?: number;
     maxPrice?: number;
     page?: number;

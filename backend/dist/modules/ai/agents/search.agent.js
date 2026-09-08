@@ -32,6 +32,7 @@ let SearchAgent = class SearchAgent {
             query: requirements.query,
             minPrice: requirements.minPrice,
             maxPrice: requirements.maxPrice,
+            brandName: requirements.brandName,
             limit: 10,
         });
         this.logger.debug(`Found ${result.total} products for query: "${requirements.query}"`);
