@@ -28,6 +28,7 @@ export class SearchService {
       categoryId,
       categorySlug,
       brandId,
+      brandName,
       minPrice,
       maxPrice,
       page = 1,
@@ -40,21 +41,22 @@ export class SearchService {
     if (categoryId) {
       where.categoryId = categoryId;
     } else if (categorySlug) {
-      // Filter by category slug (e.g. "laptops")
       where.category = { slug: { equals: categorySlug, mode: 'insensitive' } };
     } else if (query) {
-      // Auto-detect category from query keyword
       const detectedSlug = this.detectCategorySlug(query);
       if (detectedSlug) {
-        // Search by category + don't use keyword on name/description
-        // because "laptop" may not appear in product names/descriptions
         where.category = { slug: detectedSlug };
         this.logger.debug(`Auto-detected category: ${detectedSlug} from query: "${query}"`);
       }
     }
 
     // ── Brand filter ───────────────────────────────────────────────────────
-    if (brandId) where.brandId = brandId;
+    if (brandId) {
+      where.brandId = brandId;
+    } else if (brandName) {
+      where.brand = { name: { contains: brandName, mode: 'insensitive' } };
+      this.logger.debug(`Brand filter: "${brandName}"`);
+    }
 
     // ── Price filter ───────────────────────────────────────────────────────
     if (minPrice !== undefined || maxPrice !== undefined) {

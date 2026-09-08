@@ -363,7 +363,14 @@ However, DO NOT just say "not found". Instead:
 4. If the question is general (not product-specific), answer it using your knowledge
 5. Be helpful and specific — not vague
 
-Keep it under 120 words. Plain text only.`;
+Keep it under 120 words.
+
+STRICT FORMATTING RULES — no exceptions:
+- Plain text ONLY
+- No **bold**, no *italic*, no # headers, no | tables |
+- No bullet dashes (- item) or numbered lists
+- No <br> tags or HTML
+- Natural flowing sentences only`;
 
     try {
       const response = await this.aiProvider.generate({

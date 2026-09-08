@@ -43,6 +43,7 @@ export class SearchAgent implements IAgent {
       query: requirements.query,
       minPrice: requirements.minPrice,
       maxPrice: requirements.maxPrice,
+      brandName: requirements.brandName,
       limit: 10,
     });
 

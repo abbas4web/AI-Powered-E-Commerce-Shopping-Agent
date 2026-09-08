@@ -23,6 +23,11 @@ export class ProductSearchDto {
   @IsString()
   brandId?: string;
 
+  @ApiPropertyOptional({ description: 'Brand name filter (e.g. ASUS, Samsung, Apple)' })
+  @IsOptional()
+  @IsString()
+  brandName?: string;
+
   @ApiPropertyOptional({ description: 'Minimum price in INR' })
   @IsOptional()
   @Type(() => Number)
