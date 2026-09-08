@@ -50,5 +50,6 @@ export declare class SearchService {
         brandId: string;
     }>>;
     searchProductsByName(query: string): Promise<unknown[]>;
+    findSimilar(productId: string, categoryId: string, limit?: number): Promise<unknown[]>;
     detectCategorySlug(query: string): string | null;
 }

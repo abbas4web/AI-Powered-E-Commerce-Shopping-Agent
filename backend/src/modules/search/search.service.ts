@@ -118,6 +118,23 @@ export class SearchService {
     });
   }
 
+  /**
+   * Find similar products to a given product.
+   * Uses same category, excludes the original product, ordered by rating.
+   */
+  async findSimilar(productId: string, categoryId: string, limit = 4): Promise<unknown[]> {
+    return this.prisma.product.findMany({
+      where: {
+        isActive: true,
+        categoryId,
+        id: { not: productId },
+      },
+      include: { category: true, brand: true },
+      orderBy: { rating: 'desc' },
+      take: limit,
+    });
+  }
+
   /** Map a query keyword to a category slug */
   detectCategorySlug(query: string): string | null {
     const lower = query.toLowerCase();

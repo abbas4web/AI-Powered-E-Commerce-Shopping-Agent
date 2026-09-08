@@ -97,6 +97,18 @@ let SearchService = class SearchService {
             take: 1,
         });
     }
+    async findSimilar(productId, categoryId, limit = 4) {
+        return this.prisma.product.findMany({
+            where: {
+                isActive: true,
+                categoryId,
+                id: { not: productId },
+            },
+            include: { category: true, brand: true },
+            orderBy: { rating: 'desc' },
+            take: limit,
+        });
+    }
     detectCategorySlug(query) {
         const lower = query.toLowerCase();
         for (const [slug, keywords] of Object.entries(CATEGORY_KEYWORDS)) {

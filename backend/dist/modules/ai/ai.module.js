@@ -16,6 +16,7 @@ const gemini_provider_1 = require("./providers/gemini.provider");
 const groq_provider_1 = require("./providers/groq.provider");
 const ai_provider_interface_1 = require("./interfaces/ai-provider.interface");
 const router_agent_1 = require("./agents/router.agent");
+const clarification_agent_1 = require("./agents/clarification.agent");
 const search_agent_1 = require("./agents/search.agent");
 const compare_agent_1 = require("./agents/compare.agent");
 const ranking_agent_1 = require("./agents/ranking.agent");
@@ -56,6 +57,7 @@ exports.AiModule = AiModule = __decorate([
                 },
             },
             router_agent_1.RouterAgent,
+            clarification_agent_1.ClarificationAgent,
             search_agent_1.SearchAgent,
             compare_agent_1.CompareAgent,
             ranking_agent_1.RankingAgent,

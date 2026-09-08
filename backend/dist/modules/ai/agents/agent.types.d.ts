@@ -1,4 +1,4 @@
-export type AgentIntent = 'PRODUCT_SEARCH' | 'PRODUCT_COMPARE' | 'PRODUCT_DETAILS' | 'FOLLOWUP_SEARCH' | 'WISHLIST' | 'RECOMMENDATIONS' | 'GENERAL';
+export type AgentIntent = 'PRODUCT_SEARCH' | 'PRODUCT_COMPARE' | 'PRODUCT_DETAILS' | 'FOLLOWUP_SEARCH' | 'CLARIFICATION' | 'WISHLIST_ADD' | 'WISHLIST_VIEW' | 'RECOMMENDATIONS' | 'GENERAL';
 export interface ExtractedRequirements {
     query: string;
     minPrice?: number;
@@ -56,6 +56,11 @@ export interface ComparisonResult {
         }>;
     }>;
 }
+export interface BundleSuggestion {
+    category: string;
+    reason: string;
+    examples: string[];
+}
 export interface AgentContext {
     userId: string;
     conversationId: string;
@@ -66,14 +71,27 @@ export interface AgentContext {
     }>;
     intent?: AgentIntent;
     mentionedProductIds?: string[];
+    clarificationQuestion?: string;
+    missingRequirement?: 'budget' | 'useCase' | 'productType';
     previousSearchResults?: RankedProduct[];
+    previousRequirements?: ExtractedRequirements;
     conversationSummary?: string;
+    userPreferences?: {
+        preferredBrands: string[];
+        preferredCategories: string[];
+        budgetMin?: number | null;
+        budgetMax?: number | null;
+        useCases: string[];
+    };
     requirements?: ExtractedRequirements;
     searchResults?: SlimProduct[];
     totalFound?: number;
+    similarProducts?: SlimProduct[];
+    bundleSuggestions?: BundleSuggestion[];
     comparisonResult?: ComparisonResult;
     rankedProducts?: RankedProduct[];
     bestPickOnly?: boolean;
+    wishlistProductId?: string;
     finalMessage?: string;
     followUpQuestions?: string[];
 }

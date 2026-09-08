@@ -1,7 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 
-// Controllers & Services
 import { AiController } from './ai.controller';
 import { AiService } from './ai.service';
 import { AiOrchestratorService } from './ai-orchestrator.service';
@@ -13,12 +12,13 @@ import { AI_PROVIDER } from './interfaces/ai-provider.interface';
 
 // Agents
 import { RouterAgent } from './agents/router.agent';
+import { ClarificationAgent } from './agents/clarification.agent';
 import { SearchAgent } from './agents/search.agent';
 import { CompareAgent } from './agents/compare.agent';
 import { RankingAgent } from './agents/ranking.agent';
 import { ResponseAgent } from './agents/response.agent';
 
-// Tool layer (kept for direct service access)
+// Tool layer
 import { ToolDispatcherService } from './tools/tool-dispatcher.service';
 
 // Feature modules
@@ -43,30 +43,27 @@ import { PreferencesModule } from '../preferences/preferences.module';
   ],
   controllers: [AiController],
   providers: [
-    // ── AI Provider factory ──────────────────────────────────────────────────
+    // Provider factory
     GeminiProvider,
     GroqProvider,
     {
       provide: AI_PROVIDER,
       inject: [ConfigService, GeminiProvider, GroqProvider],
-      useFactory: (
-        config: ConfigService,
-        gemini: GeminiProvider,
-        groq: GroqProvider,
-      ) => {
+      useFactory: (config: ConfigService, gemini: GeminiProvider, groq: GroqProvider) => {
         const provider = config.get<string>('ai.provider') ?? 'gemini';
         return provider === 'groq' ? groq : gemini;
       },
     },
 
-    // ── Agents ───────────────────────────────────────────────────────────────
+    // Agents
     RouterAgent,
+    ClarificationAgent,
     SearchAgent,
     CompareAgent,
     RankingAgent,
     ResponseAgent,
 
-    // ── Orchestrator & Services ───────────────────────────────────────────────
+    // Services
     AiOrchestratorService,
     AiService,
     ToolDispatcherService,

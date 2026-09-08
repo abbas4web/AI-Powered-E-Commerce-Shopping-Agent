@@ -4,9 +4,10 @@
  * Flow:
  *   User message
  *     → RouterAgent       (classify intent + extract context)
- *     → SearchAgent       (extract requirements + search DB)  [SEARCH/DETAILS]
- *     → CompareAgent      (side-by-side comparison)           [COMPARE]
- *     → RankingAgent      (deterministic scoring)             [SEARCH/DETAILS]
+ *     → ClarificationAgent (ask for missing info when needed)   [CLARIFICATION]
+ *     → SearchAgent       (extract requirements + search DB)    [SEARCH/DETAILS]
+ *     → CompareAgent      (side-by-side comparison)             [COMPARE]
+ *     → RankingAgent      (deterministic scoring)               [SEARCH/DETAILS]
  *     → ResponseAgent     (write final human-readable text)
  */
 
@@ -17,8 +18,10 @@ export type AgentIntent =
   | 'PRODUCT_COMPARE'     // "ASUS vs Dell" / "compare these two"
   | 'PRODUCT_DETAILS'     // "Tell me more about the MacBook"
   | 'FOLLOWUP_SEARCH'     // "which is best?" / "only ASUS" (context-dependent)
-  | 'WISHLIST'            // "add to wishlist"
-  | 'RECOMMENDATIONS'     // "show my recommendations"
+  | 'CLARIFICATION'       // Agent asks ONE question before searching
+  | 'WISHLIST_ADD'        // "save this", "add to wishlist", "add the first one"
+  | 'WISHLIST_VIEW'       // "show my wishlist", "what have I saved?"
+  | 'RECOMMENDATIONS'     // "show my recommendations", "what did you recommend?"
   | 'GENERAL';            // greetings, general questions, anything else
 
 // ─── Requirements extracted from user message ─────────────────────────────
@@ -87,6 +90,14 @@ export interface ComparisonResult {
   }>;
 }
 
+// ─── Bundle suggestion ─────────────────────────────────────────────────────
+
+export interface BundleSuggestion {
+  category: string;
+  reason: string;
+  examples: string[];
+}
+
 // ─── Pipeline context — passed between agents ─────────────────────────────
 
 export interface AgentContext {
@@ -95,35 +106,51 @@ export interface AgentContext {
   originalMessage: string;
   history: Array<{ role: 'user' | 'assistant'; content: string }>;
 
-  // Set by RouterAgent
+  // ── Router output ──────────────────────────────────────────────────────
   intent?: AgentIntent;
   mentionedProductIds?: string[];
 
-  // ── Conversation continuity ────────────────────────────────────────────
-  // Products from the PREVIOUS turn — used for follow-up questions like
-  // "which is best?" / "compare these" / "tell me more about the first one"
-  previousSearchResults?: RankedProduct[];
+  // ── Clarification ──────────────────────────────────────────────────────
+  // When set, ResponseAgent returns this question and stops — no search done.
+  clarificationQuestion?: string;
+  // Missing requirement that triggered clarification
+  missingRequirement?: 'budget' | 'useCase' | 'productType';
 
-  // A short plain-text summary of the conversation so far.
-  // Injected by the orchestrator before each turn.
+  // ── Conversation continuity ────────────────────────────────────────────
+  previousSearchResults?: RankedProduct[];
+  previousRequirements?: ExtractedRequirements;
   conversationSummary?: string;
 
-  // Set by SearchAgent
+  // ── User preferences (loaded from DB at start of turn) ────────────────
+  userPreferences?: {
+    preferredBrands: string[];
+    preferredCategories: string[];
+    budgetMin?: number | null;
+    budgetMax?: number | null;
+    useCases: string[];
+  };
+
+  // ── Search output ──────────────────────────────────────────────────────
   requirements?: ExtractedRequirements;
   searchResults?: SlimProduct[];
   totalFound?: number;
 
-  // Set by CompareAgent
+  // ── Similar products (populated by ResponseAgent for bundle suggestions) ─
+  similarProducts?: SlimProduct[];
+  bundleSuggestions?: BundleSuggestion[];
+
+  // ── Compare output ─────────────────────────────────────────────────────
   comparisonResult?: ComparisonResult;
 
-  // Set by RankingAgent
+  // ── Ranking output ─────────────────────────────────────────────────────
   rankedProducts?: RankedProduct[];
 
-  // Set by orchestrator for "which is best?" follow-ups — ResponseAgent should
-  // trim rankedProducts to just the top 1 so only one card is shown in the UI.
+  // ── Orchestrator flags ─────────────────────────────────────────────────
   bestPickOnly?: boolean;
+  // Product ID the user wants to add to wishlist (parsed from message)
+  wishlistProductId?: string;
 
-  // Set by ResponseAgent
+  // ── Response output ────────────────────────────────────────────────────
   finalMessage?: string;
   followUpQuestions?: string[];
 }

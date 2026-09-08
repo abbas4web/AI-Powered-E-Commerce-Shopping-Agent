@@ -13,7 +13,7 @@ import { chatSchema, type ChatFormValues } from '@/lib/validations';
 import { apiClient } from '@/lib/api-client';
 import { toast } from '@/hooks/use-toast';
 import { useChatStore } from '@/store/chat.store';
-import type { ChatResponse } from '@smartshop/shared';
+import type { BundleSuggestion, ChatResponse, SimilarProductSummary } from '@smartshop/shared';
 
 const STARTER_PROMPTS = [
   'I need a laptop under ₹80,000 for Flutter development with 16GB RAM',
@@ -150,6 +150,42 @@ export function ChatInterface() {
                         <ProductRecommendationCard key={rec.productId} recommendation={rec} />
                       ))}
                     </div>
+                  </div>
+                )}
+
+                {/* Similar products */}
+                {msg.response?.similarProducts && msg.response.similarProducts.length > 0 && (
+                  <div className="ml-9 space-y-2">
+                    <p className="text-xs text-muted-foreground font-medium">You might also like</p>
+                    <div className="flex gap-2 overflow-x-auto pb-1">
+                      {msg.response.similarProducts.map((p) => (
+                        <a
+                          key={p.id}
+                          href={`/products/${p.id}`}
+                          className="flex-shrink-0 rounded-lg border bg-card p-2 hover:bg-accent transition-colors w-36 space-y-1"
+                        >
+                          <p className="text-[10px] text-muted-foreground truncate">{p.brand}</p>
+                          <p className="text-xs font-medium leading-snug line-clamp-2">{p.name}</p>
+                          <p className="text-xs font-bold text-primary">
+                            {new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(p.price)}
+                          </p>
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Bundle suggestions */}
+                {msg.response?.bundleSuggestions && msg.response.bundleSuggestions.length > 0 && (
+                  <div className="ml-9 space-y-2">
+                    {msg.response.bundleSuggestions.map((bundle) => (
+                      <div key={bundle.category} className="rounded-lg border bg-muted/40 p-3 space-y-1">
+                        <p className="text-xs font-medium">🛍 {bundle.reason}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {bundle.examples.join(' · ')}
+                        </p>
+                      </div>
+                    ))}
                   </div>
                 )}
 

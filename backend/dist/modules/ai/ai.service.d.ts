@@ -19,7 +19,24 @@ export declare class AiService {
             reason: string;
             matchedRequirements: string[];
             warnings: string[];
+            breakdown: {
+                requirementMatch: number;
+                performance: number;
+                rating: number;
+                priceValue: number;
+                reviewSentiment: number;
+                popularity: number;
+            };
         }[];
         followUpQuestions: string[];
+        bundleSuggestions: import("./agents/agent.types").BundleSuggestion[];
+        similarProducts: {
+            id: string;
+            name: string;
+            price: number;
+            brand: string;
+            imageUrl: string | null | undefined;
+            rating: number;
+        }[];
     }>;
 }

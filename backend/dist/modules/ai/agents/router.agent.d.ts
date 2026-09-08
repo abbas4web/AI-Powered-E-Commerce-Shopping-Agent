@@ -7,6 +7,7 @@ export declare class RouterAgent implements IAgent {
     run(context: AgentContext): Promise<AgentContext>;
     private buildPrompt;
     private parseIntent;
+    private detectWishlistIntent;
     private detectFollowUp;
     private keywordClassify;
     private extractUUIDs;

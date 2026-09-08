@@ -9,16 +9,46 @@
 export type AiIntent =
   | 'PRODUCT_RECOMMENDATION'
   | 'PRODUCT_SEARCH'
-  | 'COMPARISON'
+  | 'PRODUCT_COMPARE'
+  | 'PRODUCT_DETAILS'
+  | 'FOLLOWUP_SEARCH'
   | 'CLARIFICATION'
+  | 'WISHLIST_ADD'
+  | 'WISHLIST_VIEW'
+  | 'RECOMMENDATIONS'
   | 'GENERAL';
+
+export interface ScoreBreakdown {
+  requirementMatch: number; // 0–100
+  performance: number;
+  rating: number;
+  priceValue: number;
+  reviewSentiment: number;
+  popularity: number;
+}
 
 export interface ProductRecommendation {
   productId: string;
-  score: number; // 0–100
+  score: number;          // 0–100 final score
   reason: string;
   matchedRequirements: string[];
   warnings: string[];
+  breakdown?: ScoreBreakdown;
+}
+
+export interface BundleSuggestion {
+  category: string;
+  reason: string;
+  examples: string[];
+}
+
+export interface SimilarProductSummary {
+  id: string;
+  name: string;
+  price: number;
+  brand: string;
+  imageUrl?: string | null;
+  rating: number;
 }
 
 export interface ChatRequest {
@@ -32,11 +62,12 @@ export interface ChatResponse {
   intent?: AiIntent;
   products?: ProductRecommendation[];
   followUpQuestions?: string[];
+  bundleSuggestions?: BundleSuggestion[];
+  similarProducts?: SimilarProductSummary[];
 }
 
 /**
  * Structured requirement extraction — what the AI extracts from the user's message.
- * Used to feed the deterministic search pipeline.
  */
 export interface ExtractedRequirements {
   category?: string;
@@ -44,22 +75,16 @@ export interface ExtractedRequirements {
   budgetMin?: number;
   brand?: string;
   useCase?: string[];
-  // Laptop-specific
   minRam?: number;
   minStorage?: number;
   minDisplaySize?: number;
-  // Phone-specific
   minCameraMP?: number;
   minBatteryMah?: number;
-  // General
   mustHaveFeatures?: string[];
   niceToHaveFeatures?: string[];
   dealBreakers?: string[];
 }
 
-/**
- * Conversation message — stored in the conversation history.
- */
 export interface ConversationMessage {
   role: 'user' | 'assistant';
   content: string;

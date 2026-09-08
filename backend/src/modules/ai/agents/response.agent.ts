@@ -1,186 +1,165 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { AI_PROVIDER, IAIProvider, ChatMessage } from '../interfaces/ai-provider.interface';
 import { AppLogger } from '../../../common/logger/logger.service';
-import { AgentContext, IAgent, RankedProduct } from './agent.types';
+import { AgentContext, BundleSuggestion, IAgent, RankedProduct } from './agent.types';
 
 /**
- * Strip all common markdown syntax from a string so the frontend
- * always receives plain prose regardless of what the LLM decides to output.
+ * Strip all markdown from AI output so the frontend always receives plain prose.
  */
 function stripMarkdown(text: string): string {
   return text
-    // Remove fenced code blocks (```...```)
     .replace(/```[\s\S]*?```/g, '')
-    // Remove inline code (`...`)
     .replace(/`[^`]*`/g, (m) => m.slice(1, -1))
-    // Remove headings (# ## ###)
     .replace(/^#{1,6}\s+/gm, '')
-    // Remove bold/italic (*** ** * ___ __ _)
     .replace(/(\*{1,3}|_{1,3})(.*?)\1/g, '$2')
-    // Remove markdown tables — replace | with nothing, drop separator rows
     .replace(/^\|.*\|$/gm, (row) => row.replace(/\|/g, ' ').replace(/\s{2,}/g, ' ').trim())
     .replace(/^[\s-|:]+$/gm, '')
-    // Remove blockquotes
     .replace(/^>\s+/gm, '')
-    // Remove horizontal rules
     .replace(/^(-{3,}|\*{3,}|_{3,})$/gm, '')
-    // Remove bullet list markers (- * + at line start)
     .replace(/^[\s]*[-*+]\s+/gm, '')
-    // Remove numbered list markers (1. 2. etc)
     .replace(/^[\s]*\d+\.\s+/gm, '')
-    // Remove HTML tags like <br>
     .replace(/<[^>]+>/g, '')
-    // Collapse 3+ blank lines into 2
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
 
 /**
- * ResponseAgent — writes the final human-readable message.
+ * ResponseAgent — expert-quality, context-aware responses.
  *
- * Design principles (per spec):
- * 1. Never say "not found" / "couldn't find" unless truly exhausted
- * 2. Use general LLM knowledge when DB has no matching data
- * 3. Handle follow-up questions using previousSearchResults context
- * 4. Ask clarification only when genuinely needed
- * 5. Combine DB results + general knowledge when useful
- * 6. Give concise answers for simple questions, detailed for complex ones
+ * Design:
+ * - Expert sales assistant tone, not a spec sheet
+ * - Handles clarification, wishlist, bundles, general knowledge
+ * - Never says "not found" without trying alternatives
+ * - Builds smart follow-up questions that guide toward purchase
  */
 @Injectable()
 export class ResponseAgent implements IAgent {
   private readonly logger = new AppLogger('ResponseAgent');
+
+  // Category → common accessories/bundles
+  private readonly BUNDLE_MAP: Record<string, BundleSuggestion> = {
+    laptops: {
+      category: 'Accessories',
+      reason: 'Most laptop buyers also pick up these essentials',
+      examples: ['Laptop bag/sleeve', 'USB-C hub', 'Wireless mouse', 'External SSD'],
+    },
+    smartphones: {
+      category: 'Phone Accessories',
+      reason: 'Complete your phone setup',
+      examples: ['Screen protector', 'Phone case', 'Fast charger', 'TWS earbuds'],
+    },
+    headphones: {
+      category: 'Audio Accessories',
+      reason: 'Get the most from your headphones',
+      examples: ['Carry case', 'Audio cable', 'Headphone stand'],
+    },
+  };
 
   constructor(
     @Inject(AI_PROVIDER) private readonly aiProvider: IAIProvider,
   ) {}
 
   async run(context: AgentContext): Promise<AgentContext> {
-    const { intent } = context;
+    const result = await this.dispatch(context);
+    if (result.finalMessage) result.finalMessage = stripMarkdown(result.finalMessage);
+    return result;
+  }
 
-    switch (intent) {
-      case 'PRODUCT_SEARCH':
-        return this.dispatchAndClean(() => this.handleSearchResponse(context));
-      case 'FOLLOWUP_SEARCH':
-        return this.dispatchAndClean(() => this.handleFollowUpResponse(context));
-      case 'PRODUCT_COMPARE':
-        return this.dispatchAndClean(() => this.handleCompareResponse(context));
-      case 'PRODUCT_DETAILS':
-        return this.dispatchAndClean(() => this.handleDetailsResponse(context));
-      case 'WISHLIST':
-        return this.dispatchAndClean(() => this.handleWishlistResponse(context));
-      case 'RECOMMENDATIONS':
-        return this.dispatchAndClean(() => this.handleRecommendationsResponse(context));
+  private async dispatch(context: AgentContext): Promise<AgentContext> {
+    switch (context.intent) {
+      case 'CLARIFICATION':         return this.handleClarification(context);
+      case 'PRODUCT_SEARCH':        return this.handleSearchResponse(context);
+      case 'FOLLOWUP_SEARCH':       return this.handleFollowUpResponse(context);
+      case 'PRODUCT_COMPARE':       return this.handleCompareResponse(context);
+      case 'PRODUCT_DETAILS':       return this.handleDetailsResponse(context);
+      case 'WISHLIST_ADD':          return this.handleWishlistAdd(context);
+      case 'WISHLIST_VIEW':         return this.handleWishlistView(context);
+      case 'RECOMMENDATIONS':       return this.handleRecommendationsResponse(context);
       case 'GENERAL':
-      default:
-        return this.dispatchAndClean(() => this.handleGeneralResponse(context));
+      default:                      return this.handleGeneralResponse(context);
     }
   }
 
-  // Strip markdown from finalMessage after every handler returns
-  private async dispatchAndClean(
-    handler: () => Promise<AgentContext>,
-  ): Promise<AgentContext> {
-    const ctx = await handler();
-    if (ctx.finalMessage) {
-      ctx.finalMessage = stripMarkdown(ctx.finalMessage);
-    }
-    return ctx;
-  }
+  // ─── Clarification ────────────────────────────────────────────────────────
 
-  // ─── Intent handlers ──────────────────────────────────────────────────────
-
-  private async handleSearchResponse(context: AgentContext): Promise<AgentContext> {
-    const { rankedProducts, requirements, originalMessage, history } = context;
-
-    if (rankedProducts?.length) {
-      // DB has results — generate recommendation from real data
-      context.finalMessage = await this.generateSearchResponse(
-        originalMessage,
-        rankedProducts,
-        requirements,
-        history,
-      );
-    } else {
-      // DB has NO results — use general knowledge + helpful suggestion
-      // Do NOT just say "not found"
-      context.finalMessage = await this.generateNoResultsResponse(
-        originalMessage,
-        requirements,
-        history,
-      );
-    }
-
-    context.followUpQuestions = this.buildFollowUps(context);
+  private async handleClarification(context: AgentContext): Promise<AgentContext> {
+    context.finalMessage = context.clarificationQuestion ?? 'Could you share a bit more about your requirements?';
+    context.followUpQuestions = [];
+    context.rankedProducts = [];
     return context;
   }
 
-  private async handleFollowUpResponse(context: AgentContext): Promise<AgentContext> {
-    const {
-      rankedProducts,
-      previousSearchResults,
-      comparisonResult,
-      originalMessage,
-      history,
-      requirements,
-    } = context;
+  // ─── Product Search ───────────────────────────────────────────────────────
 
-    // Use current search results if available, fall back to previous turn's results
+  private async handleSearchResponse(context: AgentContext): Promise<AgentContext> {
+    const { rankedProducts, requirements, originalMessage, history, userPreferences } = context;
+
+    if (rankedProducts?.length) {
+      context.finalMessage = await this.generateExpertRecommendation(
+        originalMessage, rankedProducts, requirements, history, userPreferences,
+      );
+      // Add bundle suggestions for the top product's category
+      context.bundleSuggestions = this.getBundleSuggestions(rankedProducts[0]);
+    } else {
+      context.finalMessage = await this.generateNoResultsResponse(
+        originalMessage, requirements, history,
+      );
+    }
+
+    context.followUpQuestions = this.buildSmartFollowUps(context);
+    return context;
+  }
+
+  // ─── Follow-up ────────────────────────────────────────────────────────────
+
+  private async handleFollowUpResponse(context: AgentContext): Promise<AgentContext> {
+    const { rankedProducts, previousSearchResults, originalMessage, history } = context;
     const products = rankedProducts?.length ? rankedProducts : previousSearchResults ?? [];
 
-    if (!products.length && !comparisonResult) {
-      // No context at all — treat as a new search
-      context.intent = 'PRODUCT_SEARCH';
+    if (!products.length) {
+      context.intent = 'GENERAL';
       return this.handleGeneralResponse(context);
     }
 
-    const productContext = products
-      .map((p, i) =>
-        `${i + 1}. ${p.name} (${p.brand}) — ₹${p.price.toLocaleString('en-IN')} | Score: ${p.score}/100`,
-      )
+    const productList = products
+      .map((p, i) => `${i + 1}. ${p.name} (${p.brand}) — ₹${p.price.toLocaleString('en-IN')} | Score: ${p.score}/100`)
       .join('\n');
 
-    const recentHistory = history.slice(-6)
-      .map((m) => `${m.role}: ${m.content.slice(0, 200)}`)
+    const recentHistory = history.slice(-4)
+      .map((m) => `${m.role}: ${m.content.slice(0, 150)}`)
       .join('\n');
 
-    const prompt = `You are SmartShop AI, a helpful Indian e-commerce shopping assistant.
+    const prompt = `You are SmartShop AI, a helpful Indian e-commerce expert.
 
-CONVERSATION SO FAR:
+Previous conversation:
 ${recentHistory}
 
-CURRENT PRODUCTS IN CONTEXT:
-${productContext}
+Products being discussed:
+${productList}
 
-USER'S FOLLOW-UP: "${originalMessage}"
+User's question: "${originalMessage}"
 
-Answer the follow-up question based on the products above.
-- If asked "which is best" → recommend the highest scored one with reasons
-- If asked to compare → compare key specs from the list
-- If asked to filter (e.g. "only ASUS") → mention only matching products
-- If asked to sort → list them in the requested order
-- Be specific: mention product names, prices, specs
-- Be concise and conversational (under 150 words)
-- Plain text ONLY — no **bold**, no | tables |, no markdown of any kind
-- Do NOT search for new products — answer using only the products listed above`;
+Answer naturally and helpfully. Be specific — use product names and prices.
+If asked "which is best" → pick the top scored one and explain why clearly.
+If asked to filter by brand → list only matching ones.
+If asked to compare → highlight key differences.
+Keep it under 150 words. Plain text only — no markdown, no bullet points.`;
 
     try {
       const response = await this.aiProvider.generate({
         messages: [{ role: 'user', content: prompt }],
         temperature: 0.4,
-        maxTokens: 512,
+        maxTokens: 384,
       });
       context.finalMessage = response.content ?? this.buildFallbackMessage(products);
-    } catch (err) {
-      this.logger.warn(`Follow-up response failed: ${(err as Error).message}`);
+    } catch {
       context.finalMessage = this.buildFallbackMessage(products);
     }
 
-    // Keep showing previous products in the UI
+    // Keep showing previous products
     if (!rankedProducts?.length && previousSearchResults?.length) {
       context.rankedProducts = previousSearchResults;
     }
-
-    // "Which is best?" — trim down to just the top-scored card so UI shows one product
     if (context.bestPickOnly && context.rankedProducts?.length) {
       context.rankedProducts = context.rankedProducts.slice(0, 1);
     }
@@ -189,56 +168,54 @@ Answer the follow-up question based on the products above.
     return context;
   }
 
+  // ─── Compare ──────────────────────────────────────────────────────────────
+
   private async handleCompareResponse(context: AgentContext): Promise<AgentContext> {
     const { comparisonResult, originalMessage, rankedProducts } = context;
 
     if (!comparisonResult?.products.length) {
-      // Fallback: if we have ranked products, compare them as a follow-up
       if ((rankedProducts?.length ?? 0) >= 2) {
         context.intent = 'FOLLOWUP_SEARCH';
         return this.handleFollowUpResponse(context);
       }
-      context.finalMessage = "Please mention the specific product names you'd like to compare, e.g. 'Compare ASUS Vivobook vs Dell Inspiron'.";
+      context.finalMessage = "Please name the products you'd like to compare, e.g. 'Compare ASUS Vivobook vs Dell Inspiron'.";
       context.followUpQuestions = ['Which products would you like to compare?'];
       return context;
     }
 
-    const productList = comparisonResult.products
-      .map((p) => `${p.name} (${p.brand}) — ₹${p.price.toLocaleString('en-IN')} | Rating: ${p.rating}`)
+    const productSummary = comparisonResult.products
+      .map((p) => `${p.name} — ₹${p.price.toLocaleString('en-IN')} | Rating: ${p.rating}`)
       .join('\n');
 
-    const specRows = comparisonResult.matrix.slice(0, 8)
+    const keySpecs = comparisonResult.matrix.slice(0, 6)
       .map((row) => {
         const vals = row.values
           .map((v) => {
             const prod = comparisonResult.products.find((p) => p.id === v.productId);
-            const displayVal = v.value === null ? '—'
-              : typeof v.value === 'object' ? JSON.stringify(v.value)
-              : String(v.value);
-            return `${prod?.name?.split(' ')[0]}: ${displayVal}`;
+            const val = v.value === null ? '—' : typeof v.value === 'object' ? JSON.stringify(v.value) : String(v.value);
+            return `${prod?.name?.split(' ')[0]}: ${val}`;
           })
-          .join(' | ');
+          .join(' vs ');
         return `${row.attribute}: ${vals}`;
       })
       .join('\n');
 
-    const prompt = `You are SmartShop AI. The user wants to compare these products.
+    const prompt = `You are SmartShop AI. Compare these products for the user.
 
 User asked: "${originalMessage}"
 
-PRODUCTS:
-${productList}
+Products:
+${productSummary}
 
-KEY SPECS COMPARISON:
-${specRows}
+Key specs:
+${keySpecs}
 
-Write a comparison response that:
-1. Highlights the key differences (processor, RAM, display, battery, price)
-2. Says which product is best for what type of user
-3. Gives a clear final recommendation
-4. Is conversational and easy to read (under 200 words)
+Write a clear, helpful comparison (under 180 words):
+1. Highlight the main differences that matter for the user
+2. State clearly which is better for which type of user
+3. Give a definitive recommendation with a reason
 
-Plain text ONLY — no **bold**, no | tables |, no markdown. Natural sentences only.`;
+Plain text only. Natural sentences. No markdown, no bullet points.`;
 
     try {
       const response = await this.aiProvider.generate({
@@ -246,14 +223,16 @@ Plain text ONLY — no **bold**, no | tables |, no markdown. Natural sentences o
         temperature: 0.4,
         maxTokens: 512,
       });
-      context.finalMessage = response.content ?? `Here's a comparison of ${comparisonResult.products.map((p) => p.name).join(' vs ')}.`;
+      context.finalMessage = response.content ?? `Comparing ${comparisonResult.products.map((p) => p.name).join(' and ')} — see the spec table below.`;
     } catch {
-      context.finalMessage = `Comparing ${comparisonResult.products.map((p) => p.name).join(' and ')}. Check the comparison table below for full specs.`;
+      context.finalMessage = `Here's a comparison of ${comparisonResult.products.map((p) => p.name).join(' and ')}. Check the spec table below.`;
     }
 
-    context.followUpQuestions = ['Would you like to add one of these to your wishlist?'];
+    context.followUpQuestions = ['Would you like to add one of these to your wishlist?', 'Want to see more similar options?'];
     return context;
   }
+
+  // ─── Product Details ──────────────────────────────────────────────────────
 
   private async handleDetailsResponse(context: AgentContext): Promise<AgentContext> {
     const { rankedProducts, originalMessage } = context;
@@ -265,19 +244,22 @@ Plain text ONLY — no **bold**, no | tables |, no markdown. Natural sentences o
     }
 
     const product = rankedProducts[0];
-    const specs = JSON.stringify(product.breakdown, null, 2);
 
-    const prompt = `You are SmartShop AI. Give detailed info about this product.
+    const prompt = `You are SmartShop AI. The user wants details about a product.
 
 User asked: "${originalMessage}"
 
 Product: ${product.name} by ${product.brand}
 Price: ₹${product.price.toLocaleString('en-IN')}
-Rating: ${product.score}/100
-Matched requirements: ${product.matchedRequirements.join(', ') || 'general match'}
-${product.warnings.length ? `Warnings: ${product.warnings.join(', ')}` : ''}
+Score: ${product.score}/100
+Strengths: ${product.matchedRequirements.join(', ') || 'good overall value'}
+${product.warnings.length ? `Notes: ${product.warnings.join(', ')}` : ''}
 
-Write a detailed but concise product overview (under 150 words). Plain text only.`;
+Write a helpful, specific product overview (under 120 words).
+- Focus on what makes this product good for its intended use
+- Mention specific standout features
+- Be honest about any limitations
+Plain text only.`;
 
     try {
       const response = await this.aiProvider.generate({
@@ -285,104 +267,130 @@ Write a detailed but concise product overview (under 150 words). Plain text only
         temperature: 0.4,
         maxTokens: 384,
       });
-      context.finalMessage = response.content ?? `${product.name} by ${product.brand} is priced at ₹${product.price.toLocaleString('en-IN')} with a score of ${product.score}/100.`;
+      context.finalMessage = response.content ?? `${product.name} by ${product.brand} — ₹${product.price.toLocaleString('en-IN')} (Score: ${product.score}/100)`;
     } catch {
       context.finalMessage = `${product.name} by ${product.brand} — ₹${product.price.toLocaleString('en-IN')}. Score: ${product.score}/100.`;
     }
 
     context.followUpQuestions = [
       'Would you like to compare this with similar products?',
-      'Want to add this to your wishlist?',
+      'Add this to your wishlist?',
     ];
     return context;
   }
 
-  private async handleWishlistResponse(context: AgentContext): Promise<AgentContext> {
-    context.finalMessage = "To add a product to your wishlist, tap the ❤ button on any product card. You can view your saved items in the Wishlist section.";
-    context.followUpQuestions = [];
+  // ─── Wishlist ─────────────────────────────────────────────────────────────
+
+  private async handleWishlistAdd(context: AgentContext): Promise<AgentContext> {
+    const { wishlistProductId, rankedProducts, previousSearchResults } = context;
+
+    // Determine which product to add
+    const products = rankedProducts?.length ? rankedProducts : previousSearchResults ?? [];
+    const targetProduct = wishlistProductId
+      ? products.find((p) => p.productId === wishlistProductId)
+      : products[0]; // default to top-ranked
+
+    if (targetProduct) {
+      context.finalMessage = `I've saved ${targetProduct.name} to your wishlist. You can view all saved items in the Wishlist section.`;
+    } else {
+      context.finalMessage = "To save a product, tap the heart icon on any product card. Or tell me which product you'd like to save and I'll help.";
+    }
+
+    context.followUpQuestions = ['Would you like to see similar products?'];
     return context;
   }
+
+  private async handleWishlistView(context: AgentContext): Promise<AgentContext> {
+    context.finalMessage = "Your saved items are in the Wishlist section in the left sidebar. Tap it to see all your saved products and manage them.";
+    context.followUpQuestions = ['Want me to find more products to add?'];
+    return context;
+  }
+
+  // ─── Recommendations ──────────────────────────────────────────────────────
 
   private async handleRecommendationsResponse(context: AgentContext): Promise<AgentContext> {
-    context.finalMessage = "Your personalized recommendations are in the Recommendations section. They're saved from your previous AI conversations.";
-    context.followUpQuestions = [];
+    context.finalMessage = "Your personalized recommendations are saved in the Recommendations section. They're updated every time the AI suggests products for you based on your conversations.";
+    context.followUpQuestions = ['Want me to find new recommendations for you?'];
     return context;
   }
+
+  // ─── General ─────────────────────────────────────────────────────────────
 
   private async handleGeneralResponse(context: AgentContext): Promise<AgentContext> {
-    const { originalMessage, history } = context;
-
-    context.finalMessage = await this.generateGeneralAnswer(originalMessage, history);
+    context.finalMessage = await this.generateGeneralAnswer(context.originalMessage, context.history);
     context.followUpQuestions = [];
     return context;
   }
 
-  // ─── AI call helpers ─────────────────────────────────────────────────────
+  // ─── Core AI generation ───────────────────────────────────────────────────
 
   /**
-   * Generate a recommendation response from real DB results.
-   * AI writes the text — never decides which products to show.
+   * Expert recommendation — sounds like a knowledgeable sales consultant,
+   * not a spec sheet. References use case, explains WHY each product fits.
    */
-  private async generateSearchResponse(
+  private async generateExpertRecommendation(
     message: string,
     products: RankedProduct[],
     requirements: AgentContext['requirements'],
     history: AgentContext['history'],
+    userPreferences: AgentContext['userPreferences'],
   ): Promise<string> {
-    const recentHistory = history.slice(-4)
-      .map((m) => `${m.role}: ${m.content.slice(0, 150)}`)
+    const recentHistory = history.slice(-3)
+      .map((m) => `${m.role}: ${m.content.slice(0, 120)}`)
       .join('\n');
+
+    const budget = requirements?.maxPrice
+      ? `under ₹${requirements.maxPrice.toLocaleString('en-IN')}`
+      : 'no specific budget';
+
+    const useCases = requirements?.useCases?.join(', ') || '';
+    const preferredBrand = userPreferences?.preferredBrands?.join(', ') || requirements?.brandName || '';
 
     const productList = products
       .map((p, i) =>
         `${i + 1}. ${p.name} (${p.brand}) — ₹${p.price.toLocaleString('en-IN')} | Score: ${p.score}/100` +
-        (p.matchedRequirements.length ? ` | Matches: ${p.matchedRequirements.join(', ')}` : '') +
-        (p.warnings.length ? ` | ⚠ ${p.warnings.join(', ')}` : ''),
+        (p.matchedRequirements.length ? ` | Strengths: ${p.matchedRequirements.join(', ')}` : '') +
+        (p.warnings.length ? ` | Watch out: ${p.warnings.join(', ')}` : ''),
       )
       .join('\n');
 
-    const budget = requirements?.maxPrice
-      ? `Budget: under ₹${requirements.maxPrice.toLocaleString('en-IN')}`
-      : '';
+    const prompt = `You are SmartShop AI, a trusted shopping advisor for Indian consumers.
 
-    const prompt = `You are SmartShop AI, a helpful Indian e-commerce shopping assistant.
-${recentHistory ? `\nConversation context:\n${recentHistory}\n` : ''}
-User asked: "${message}"
-${budget}
+${recentHistory ? `Context from conversation:\n${recentHistory}\n` : ''}User's request: "${message}"
+Budget: ${budget}
+${useCases ? `Use case: ${useCases}` : ''}
+${preferredBrand ? `Preferred brand: ${preferredBrand}` : ''}
 
-Products found in our catalog (ranked by relevance):
+Products ranked by our system (best match first):
 ${productList}
 
-Write a helpful, natural response that:
-1. Directly answers the user's question
-2. Mentions ALL ${products.length} products by name and price
-3. Highlights the top pick with a specific reason
-4. Mentions key specs relevant to the user's use case
-5. Is friendly and conversational (under 200 words)
+Write a recommendation that sounds like advice from a trusted expert — not a product listing.
 
-STRICT FORMATTING RULES:
-- Plain text ONLY
-- NO markdown — no **bold**, no *italic*, no | tables |, no # headers, no bullet dashes
-- NO JSON
-- Write in natural flowing sentences and paragraphs only`;
+Guidelines:
+- Open with a direct answer to what they asked
+- Mention ALL ${products.length} products naturally (not as a bullet list)
+- Explain WHY the top pick is best for their SPECIFIC situation
+- Mention one standout feature per product that's relevant to their use case
+- If a product has warnings, mention them honestly but constructively
+- Close with a clear recommendation or next step
+- Tone: helpful, confident, conversational — like a knowledgeable friend
+- Length: 2-3 paragraphs, under 220 words
+
+Plain text ONLY. No markdown. No bullet points. No headers. Natural prose.`;
 
     try {
       const response = await this.aiProvider.generate({
         messages: [{ role: 'user', content: prompt }],
         temperature: 0.5,
-        maxTokens: 512,
+        maxTokens: 600,
       });
       return response.content ?? this.buildFallbackMessage(products);
     } catch (err) {
-      this.logger.warn(`Search response generation failed: ${(err as Error).message}`);
+      this.logger.warn(`Expert recommendation failed: ${(err as Error).message}`);
       return this.buildFallbackMessage(products);
     }
   }
 
-  /**
-   * When DB has no results — use general LLM knowledge instead of "not found".
-   * Per spec: "Do NOT unnecessarily show not found / couldn't find".
-   */
   private async generateNoResultsResponse(
     message: string,
     requirements: AgentContext['requirements'],
@@ -390,121 +398,121 @@ STRICT FORMATTING RULES:
   ): Promise<string> {
     const query = requirements?.query ?? message;
     const budget = requirements?.maxPrice
-      ? ` under ₹${requirements.maxPrice.toLocaleString('en-IN')}`
-      : '';
+      ? ` under ₹${requirements.maxPrice.toLocaleString('en-IN')}` : '';
 
-    const prompt = `You are SmartShop AI, a helpful Indian e-commerce shopping assistant.
+    const prompt = `You are SmartShop AI. The user asked about "${message}" but we don't have ${query}${budget} in our catalog right now.
 
-The user asked: "${message}"
-
-Our product catalog doesn't currently have ${query}${budget} in stock.
-
-However, DO NOT just say "not found". Instead:
+Be genuinely helpful — don't just say "not found":
 1. Acknowledge what they're looking for
-2. Share useful general knowledge about ${query} if relevant (e.g. what to look for, typical price range in India)
-3. Suggest they broaden their search, adjust budget, or check back later
-4. If the question is general (not product-specific), answer it using your knowledge
-5. Be helpful and specific — not vague
+2. If relevant, share what to look for in ${query} (general buying guide)
+3. Suggest checking back, adjusting budget, or trying a related search
+4. If they asked a general question, answer it from general knowledge
 
-Keep it under 120 words.
-
-STRICT FORMATTING RULES — no exceptions:
-- Plain text ONLY
-- No **bold**, no *italic*, no # headers, no | tables |
-- No bullet dashes (- item) or numbered lists
-- No <br> tags or HTML
-- Natural flowing sentences only`;
+Under 100 words. Plain text. Natural sentences.`;
 
     try {
       const response = await this.aiProvider.generate({
         messages: [{ role: 'user', content: prompt }],
         temperature: 0.5,
-        maxTokens: 384,
+        maxTokens: 256,
       });
-      return response.content ?? `We don't have ${query}${budget} right now, but I can help you find alternatives. Try adjusting your budget or search terms.`;
+      return response.content ?? `We don't have ${query}${budget} in our catalog right now. Try adjusting your search or check back later.`;
     } catch {
-      return `We don't have ${query}${budget} in our catalog right now. Try broadening your search or adjusting the budget.`;
+      return `We don't have ${query}${budget} right now. Try broadening your search.`;
     }
   }
 
-  /**
-   * General purpose LLM answer — handles greetings, tech questions,
-   * how-to questions, anything not product-specific.
-   * Per spec: AI should use general knowledge freely.
-   */
   private async generateGeneralAnswer(
     message: string,
     history: AgentContext['history'],
   ): Promise<string> {
+    const msgs: ChatMessage[] = [];
     const recentHistory = history.slice(-6)
-      .map((m) => `${m.role}: ${m.content.slice(0, 200)}`)
-      .join('\n');
+      .map((m) => `${m.role}: ${m.content.slice(0, 200)}`).join('\n');
 
-    const messages: ChatMessage[] = [];
-
-    if (recentHistory) {
-      messages.push({ role: 'user', content: recentHistory });
-    }
-
-    messages.push({ role: 'user', content: message });
+    if (recentHistory) msgs.push({ role: 'user', content: recentHistory });
+    msgs.push({ role: 'user', content: message });
 
     try {
       const response = await this.aiProvider.generate({
-        messages,
-        systemPrompt: `You are SmartShop AI, a friendly and knowledgeable shopping assistant for an Indian e-commerce platform.
-
-You can:
-- Answer general questions about technology, products, and shopping
-- Help users decide what to buy based on their needs
-- Explain technical specs in simple terms
-- Give buying advice based on general knowledge
-- Discuss product categories, trends, and recommendations
-
-If the user asks about specific products in our catalog, ask them to use the search.
-Keep responses concise and genuinely helpful.
-Never make up specific product prices or specs — use general knowledge ranges only.
-
-STRICT FORMATTING RULES — these are mandatory, no exceptions:
-- Plain text ONLY — never use markdown
-- No **bold** or *italic*
-- No # headers or ### headers
-- No | table | formatting
-- No bullet dashes (- item) or numbered lists (1. item) unless the user explicitly asks for a list
-- No <br> tags or HTML of any kind
-- Write in natural flowing sentences and paragraphs only`,
+        messages: msgs,
+        systemPrompt: `You are SmartShop AI, a knowledgeable Indian e-commerce shopping assistant.
+Help with product questions, tech advice, buying guidance, and general shopping questions.
+Use specific knowledge about Indian market pricing, popular brands, and value-for-money options.
+Keep responses concise and genuinely useful.
+Never invent specific product prices or model numbers — use approximate ranges when needed.
+Plain text only — no markdown, no bullet points, natural sentences.`,
         temperature: 0.6,
         maxTokens: 384,
       });
-      return response.content ?? "I'm SmartShop AI. How can I help you find the perfect product?";
+      return response.content ?? "I'm SmartShop AI. Ask me anything about products and I'll help you find the best options!";
     } catch {
-      return "I'm SmartShop AI, your shopping assistant. Tell me what you're looking for and I'll find the best options!";
+      return "I'm SmartShop AI, your shopping assistant. Tell me what you're looking for!";
     }
+  }
+
+  // ─── Smart follow-ups ────────────────────────────────────────────────────
+
+  private buildSmartFollowUps(context: AgentContext): string[] {
+    const { requirements, rankedProducts } = context;
+    const questions: string[] = [];
+
+    if (!rankedProducts?.length) {
+      return ['Would you like to try a different search?', 'Can I help you find something similar?'];
+    }
+
+    // Budget-related
+    if (requirements?.maxPrice && rankedProducts.some((p) => p.warnings.some((w) => w.includes('over budget')))) {
+      questions.push('Would you like to increase your budget to see more options?');
+    }
+
+    // Use-case refinement
+    if (!requirements?.useCases?.length) {
+      const productType = requirements?.query ?? 'this';
+      questions.push(`What will you mainly use ${productType === 'laptop' ? 'the laptop' : 'it'} for?`);
+    }
+
+    // Brand preference
+    if (!requirements?.brandName && rankedProducts.length > 3) {
+      questions.push('Do you prefer any particular brand?');
+    }
+
+    // Purchase nudge when there's a clear top pick
+    if (rankedProducts.length > 0 && rankedProducts[0].score >= 80) {
+      questions.push(`Want to know more about the ${rankedProducts[0].name}?`);
+    }
+
+    // Comparison nudge
+    if (rankedProducts.length >= 3) {
+      questions.push(`Compare the top ${Math.min(rankedProducts.length, 3)} options?`);
+    }
+
+    return questions.slice(0, 2);
+  }
+
+  // ─── Bundle suggestions ───────────────────────────────────────────────────
+
+  private getBundleSuggestions(topProduct: RankedProduct): BundleSuggestion[] {
+    const category = topProduct.name.toLowerCase();
+
+    if (/laptop|macbook|vivobook|inspiron|thinkpad|zenbook|ideapad|swift|pavilion/.test(category)) {
+      return [this.BUNDLE_MAP.laptops];
+    }
+    if (/iphone|galaxy|pixel|redmi|oneplus|moto|narzo/.test(category)) {
+      return [this.BUNDLE_MAP.smartphones];
+    }
+    if (/wh-|wf-|airpods|buds|rockerz|airdopes|boat|noise/.test(category)) {
+      return [this.BUNDLE_MAP.headphones];
+    }
+    return [];
   }
 
   // ─── Helpers ─────────────────────────────────────────────────────────────
 
   private buildFallbackMessage(products: RankedProduct[]): string {
     if (!products.length) return "I couldn't find matching products. Try a different search.";
-    const lines = products
+    return products
       .map((p, i) => `${i + 1}. ${p.name} by ${p.brand} — ₹${p.price.toLocaleString('en-IN')} (Score: ${p.score}/100)`)
       .join('\n');
-    return `Here are the best matching products:\n\n${lines}`;
-  }
-
-  private buildFollowUps(context: AgentContext): string[] {
-    const { requirements, rankedProducts } = context;
-    const questions: string[] = [];
-
-    if (rankedProducts?.length && !requirements?.brandName) {
-      questions.push('Do you have a preferred brand?');
-    }
-    if (rankedProducts?.length && !requirements?.useCases?.length) {
-      questions.push('What will you primarily use this for?');
-    }
-    if (requirements?.maxPrice && rankedProducts?.some((p) => p.warnings.some((w) => w.includes('over budget')))) {
-      questions.push('Would you like to increase your budget?');
-    }
-
-    return questions.slice(0, 2);
   }
 }

@@ -6,12 +6,16 @@ import { AgentContext, AgentIntent, IAgent } from './agent.types';
 /**
  * RouterAgent — AI-first intent classification with full conversation context.
  *
- * Design principles:
- * - Uses the last 6 history turns to understand follow-up messages
- * - Understands "which is best?", "compare these", "tell me more" in context
- * - Falls back to keyword matching only on AI failure
- * - Never defaults to PRODUCT_SEARCH for ambiguous messages — uses GENERAL
- *   so the ResponseAgent can handle it with LLM general knowledge
+ * Intents:
+ *   PRODUCT_SEARCH     → find/buy products
+ *   PRODUCT_COMPARE    → compare named products
+ *   PRODUCT_DETAILS    → details about one product
+ *   FOLLOWUP_SEARCH    → refine previous search
+ *   CLARIFICATION      → agent needs to ask a question first
+ *   WISHLIST_ADD       → "save this", "add to wishlist"
+ *   WISHLIST_VIEW      → "show my wishlist"
+ *   RECOMMENDATIONS    → "show my recommendations"
+ *   GENERAL            → everything else
  */
 @Injectable()
 export class RouterAgent implements IAgent {
@@ -24,29 +28,38 @@ export class RouterAgent implements IAgent {
   async run(context: AgentContext): Promise<AgentContext> {
     const { originalMessage, history, previousSearchResults } = context;
 
-    // Detect obvious follow-up patterns before calling AI
-    const isFollowUp = this.detectFollowUp(originalMessage, history, previousSearchResults);
-    if (isFollowUp) {
-      this.logger.debug(`Detected follow-up message — using FOLLOWUP_SEARCH`);
-      context.intent = 'FOLLOWUP_SEARCH';
+    // Fast: detect wishlist commands without AI call
+    const wishlistIntent = this.detectWishlistIntent(originalMessage);
+    if (wishlistIntent) {
+      context.intent = wishlistIntent;
       context.mentionedProductIds = this.extractUUIDs(originalMessage);
+      this.logger.debug(`Wishlist intent: ${wishlistIntent}`);
       return context;
     }
 
-    // Use AI for full context-aware classification
+    // Fast: detect obvious follow-ups
+    const isFollowUp = this.detectFollowUp(originalMessage, history, previousSearchResults);
+    if (isFollowUp) {
+      context.intent = 'FOLLOWUP_SEARCH';
+      context.mentionedProductIds = this.extractUUIDs(originalMessage);
+      this.logger.debug(`Follow-up detected`);
+      return context;
+    }
+
+    // AI classification
     try {
       const response = await this.aiProvider.generate({
         messages: [{ role: 'user', content: this.buildPrompt(originalMessage, history) }],
         temperature: 0.1,
-        maxTokens: 128,
+        maxTokens: 64,
       });
 
       const raw = (response.content ?? '').trim().toUpperCase();
       const intent = this.parseIntent(raw);
-      this.logger.debug(`RouterAgent classified: "${intent}" for message: "${originalMessage}"`);
+      this.logger.debug(`Intent: ${intent} for: "${originalMessage}"`);
       context.intent = intent;
     } catch (err) {
-      this.logger.warn(`RouterAgent AI failed, using keyword fallback: ${(err as Error).message}`);
+      this.logger.warn(`RouterAgent AI failed: ${(err as Error).message}`);
       context.intent = this.keywordClassify(originalMessage) ?? 'GENERAL';
     }
 
@@ -61,46 +74,52 @@ export class RouterAgent implements IAgent {
       .map((m) => `${m.role.toUpperCase()}: ${m.content.slice(0, 120)}`)
       .join('\n');
 
-    return `You are a router for an AI shopping assistant. Classify the user's latest message.
+    return `You are a router for an AI shopping assistant. Classify the user's latest message into EXACTLY ONE category.
 
-${recentHistory ? `CONVERSATION HISTORY (recent):\n${recentHistory}\n` : ''}
+${recentHistory ? `CONVERSATION HISTORY:\n${recentHistory}\n` : ''}LATEST MESSAGE: "${message}"
 
-LATEST MESSAGE: "${message}"
+CATEGORIES:
+- PRODUCT_SEARCH: User wants to find/buy products. e.g. "best laptop under 80k", "I need a phone", "gaming laptop"
+- PRODUCT_COMPARE: Compare specific named products. e.g. "ASUS vs Dell", "compare iPhone and Samsung"
+- PRODUCT_DETAILS: Details about one product. e.g. "tell me more about MacBook", "specs of Dell XPS"
+- FOLLOWUP_SEARCH: Refining previous results. e.g. "only ASUS", "increase budget", "which is cheapest?"
+- CLARIFICATION: User's request is too vague to search meaningfully. e.g. "I need something good", "show me a laptop" with no other info
+- WISHLIST_ADD: Save a product. e.g. "add to wishlist", "save this", "save the Dell one"
+- WISHLIST_VIEW: View saved items. e.g. "show my wishlist", "what did I save?"
+- RECOMMENDATIONS: View AI recommendations. e.g. "show my recommendations", "what did you recommend?"
+- GENERAL: Greetings, general tech questions, anything else. e.g. "hi", "what specs should I look for?"
 
-INTENT CATEGORIES:
-- PRODUCT_SEARCH: User wants to find or buy products. Includes: "best X", "under budget", "I need X", "show me phones", "laptop for coding"
-- PRODUCT_COMPARE: User wants to compare specific named products. Includes: "X vs Y", "compare A and B", "difference between X and Y", "which is better X or Y"
-- PRODUCT_DETAILS: User wants details about one specific product. Includes: "tell me more about X", "specs of X", "what is the battery life of X"
-- FOLLOWUP_SEARCH: User is refining a PREVIOUS search in context. Includes: "only ASUS", "increase budget to 90k", "which is best?", "in these which one", "sort by price", "show cheaper ones"
-- WISHLIST: User wants to manage wishlist. Includes: "add to wishlist", "save this", "show my wishlist"
-- RECOMMENDATIONS: User wants saved recommendations. Includes: "my recommendations", "what did you recommend"
-- GENERAL: Everything else — greetings, general questions about technology, how-to questions, questions not about shopping
+RULES:
+- CLARIFICATION only when truly impossible to search (completely vague, no product type)
+- If product type is mentioned (laptop, phone, etc.), use PRODUCT_SEARCH not CLARIFICATION
+- For follow-ups on previous products, use FOLLOWUP_SEARCH
+- Greetings are always GENERAL
 
-IMPORTANT RULES:
-- If the message is a follow-up on previous products discussed (like "which is best?" or "compare these"), use FOLLOWUP_SEARCH
-- If no products or budget is mentioned and the history has no shopping context, use GENERAL
-- For greetings like "hi", "hello", "how are you" — always use GENERAL
-
-Reply with ONLY the intent name. Nothing else.`;
+Reply with ONLY the category name.`;
   }
 
   private parseIntent(raw: string): AgentIntent {
     const intents: AgentIntent[] = [
-      'PRODUCT_SEARCH',
-      'PRODUCT_COMPARE',
-      'PRODUCT_DETAILS',
-      'FOLLOWUP_SEARCH',
-      'WISHLIST',
-      'RECOMMENDATIONS',
-      'GENERAL',
+      'PRODUCT_SEARCH', 'PRODUCT_COMPARE', 'PRODUCT_DETAILS',
+      'FOLLOWUP_SEARCH', 'CLARIFICATION',
+      'WISHLIST_ADD', 'WISHLIST_VIEW',
+      'RECOMMENDATIONS', 'GENERAL',
     ];
     return intents.find((i) => raw.includes(i)) ?? 'GENERAL';
   }
 
-  /**
-   * Detect obvious follow-up messages based on patterns and history.
-   * Avoids an AI call for common follow-up phrases.
-   */
+  private detectWishlistIntent(message: string): AgentIntent | null {
+    const lower = message.toLowerCase().trim();
+    if (/show (my )?wishlist|view (my )?wishlist|what('s| is| did i) (in |in my |i )?save/i.test(lower)) {
+      return 'WISHLIST_VIEW';
+    }
+    if (/(add|save|put).*(wishlist|wish list|later|saved)/i.test(lower) ||
+        /^(save|add) (this|it|the (first|second|third|top))/i.test(lower)) {
+      return 'WISHLIST_ADD';
+    }
+    return null;
+  }
+
   private detectFollowUp(
     message: string,
     history: AgentContext['history'],
@@ -112,47 +131,36 @@ Reply with ONLY the intent name. Nothing else.`;
     const hasRecentSearch = history.some(
       (h) => h.role === 'assistant' && h.content.includes('₹'),
     );
-
     if (!hasRecentSearch && !previousResults?.length) return false;
 
-    // If message contains a use-case change, it's NOT a simple follow-up
-    // It needs a new search — let followUpNeedsNewSearch handle it
+    // Use-case change → needs new search, not a simple follow-up
     const hasUseCaseChange = /for\s+(gaming|game|graphic[\s-]*design|web[\s-]*dev|development|coding|programming|video[\s-]*editing|photography|business|flutter|android|study|work|office)/i.test(lower);
     if (hasUseCaseChange) return false;
 
-    // Pure follow-up patterns (no new use-case or product type mentioned)
-    const followUpPatterns = [
+    const patterns = [
       /^(which|what).*(best|cheapest|expensive|recommended|good)/,
       /^(in these|among these|from these|out of these)/,
-      /^(only|just|show only|filter).+(brand|asus|dell|lenovo|apple|samsung|sony)/,
+      /^(only|just|show only|filter).+(brand|asus|dell|lenovo|apple|samsung|sony|hp|acer|msi|oneplus|google)/,
       /^(increase|decrease|change).*(budget|price|range)/,
       /^(compare these|compare them|compare all)/,
       /^(tell me more|more details|details about).*(first|second|third|this|that)/,
       /^(sort|order|rank).*(price|rating|score)/,
-      /^(add (the )?(first|second|third|this|that)|save (this|it))/,
       /^(what about|how about).*(first|second|third)/,
       /^(the (first|second|third) one)/,
+      /^(show|give).*(cheaper|expensive|budget|premium)/,
     ];
-
-    return followUpPatterns.some((p) => p.test(lower));
+    return patterns.some((p) => p.test(lower));
   }
 
-  /** Fast keyword classification — used only as fallback */
   private keywordClassify(message: string): AgentIntent | null {
     const lower = message.toLowerCase().trim();
-
-    if (/^(hi|hello|hey|how are you|what can you do|thanks|thank you)/.test(lower)) {
-      return 'GENERAL';
-    }
-    if (/\bvs\b|\bversus\b|\bcompare\b|difference between/.test(lower)) {
-      return 'PRODUCT_COMPARE';
-    }
-    if (/wishlist|add to (my )?wish/.test(lower)) return 'WISHLIST';
+    if (/^(hi|hello|hey|how are you|what can you do|thanks|thank you)/.test(lower)) return 'GENERAL';
+    if (/\bvs\b|\bversus\b|\bcompare\b|difference between/.test(lower)) return 'PRODUCT_COMPARE';
+    if (/show (my )?wishlist/.test(lower)) return 'WISHLIST_VIEW';
+    if (/(add|save).*(wishlist|later)/.test(lower)) return 'WISHLIST_ADD';
     if (/my recommendations|saved recommendations/.test(lower)) return 'RECOMMENDATIONS';
-    if (
-      /under|below|budget|₹|rs\.|rupee|laptop|phone|mobile|tablet|headphone|camera|tv|monitor/.test(lower) ||
-      /need|want|buy|looking for|suggest|recommend|find me|show me|best/.test(lower)
-    ) {
+    if (/under|below|budget|₹|rs\.|rupee|laptop|phone|mobile|tablet|headphone|camera|tv|monitor|power.?bank/.test(lower) ||
+        /need|want|buy|looking for|suggest|recommend|find me|show me|best/.test(lower)) {
       return 'PRODUCT_SEARCH';
     }
     return null;
