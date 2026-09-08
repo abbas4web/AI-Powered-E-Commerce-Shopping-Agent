@@ -65,12 +65,26 @@ export class SearchService {
       if (maxPrice !== undefined) where.price.lte = maxPrice;
     }
 
-    // ── Text search (only if no category was auto-detected) ───────────────
-    if (query && !where.category) {
-      where.OR = [
-        { name: { contains: query, mode: 'insensitive' } },
-        { description: { contains: query, mode: 'insensitive' } },
-      ];
+    // ── Text search ───────────────────────────────────────────────────────
+    // Always run text search when a query is provided.
+    // When a category was auto-detected, remove the category keyword from
+    // the query before text-searching so we get use-case matches
+    // (e.g. "gaming" matches gaming laptops even within the laptops category).
+    if (query) {
+      const categoryKeywords = Object.values(CATEGORY_KEYWORDS).flat();
+      const queryWithoutCategory = query
+        .split(' ')
+        .filter((w) => !categoryKeywords.includes(w.toLowerCase()))
+        .join(' ')
+        .trim();
+
+      if (queryWithoutCategory) {
+        // Combine category filter with use-case text search
+        where.OR = [
+          { name: { contains: queryWithoutCategory, mode: 'insensitive' } },
+          { description: { contains: queryWithoutCategory, mode: 'insensitive' } },
+        ];
+      }
     }
 
     const skip = (page - 1) * limit;

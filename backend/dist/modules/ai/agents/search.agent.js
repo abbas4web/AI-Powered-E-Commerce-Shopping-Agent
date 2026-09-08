@@ -28,14 +28,17 @@ let SearchAgent = class SearchAgent {
         const requirements = await this.extractRequirements(originalMessage, history);
         context.requirements = requirements;
         this.logger.debug(`Extracted: ${JSON.stringify(requirements)}`);
+        const useCaseQuery = requirements.useCases?.length
+            ? `${requirements.query} ${requirements.useCases[0]}`
+            : requirements.query;
         const result = await this.searchService.searchProducts({
-            query: requirements.query,
+            query: useCaseQuery,
             minPrice: requirements.minPrice,
             maxPrice: requirements.maxPrice,
             brandName: requirements.brandName,
             limit: 10,
         });
-        this.logger.debug(`Found ${result.total} products for query: "${requirements.query}"`);
+        this.logger.debug(`Found ${result.total} products for query: "${useCaseQuery}"`);
         context.searchResults = result.items.map((p) => ({
             id: p.id,
             name: p.name,

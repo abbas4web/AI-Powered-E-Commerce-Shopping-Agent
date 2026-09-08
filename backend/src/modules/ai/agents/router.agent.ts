@@ -115,7 +115,12 @@ Reply with ONLY the intent name. Nothing else.`;
 
     if (!hasRecentSearch && !previousResults?.length) return false;
 
-    // Follow-up patterns
+    // If message contains a use-case change, it's NOT a simple follow-up
+    // It needs a new search — let followUpNeedsNewSearch handle it
+    const hasUseCaseChange = /for\s+(gaming|game|graphic[\s-]*design|web[\s-]*dev|development|coding|programming|video[\s-]*editing|photography|business|flutter|android|study|work|office)/i.test(lower);
+    if (hasUseCaseChange) return false;
+
+    // Pure follow-up patterns (no new use-case or product type mentioned)
     const followUpPatterns = [
       /^(which|what).*(best|cheapest|expensive|recommended|good)/,
       /^(in these|among these|from these|out of these)/,

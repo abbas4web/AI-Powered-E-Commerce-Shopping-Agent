@@ -58,11 +58,19 @@ let SearchService = class SearchService {
             if (maxPrice !== undefined)
                 where.price.lte = maxPrice;
         }
-        if (query && !where.category) {
-            where.OR = [
-                { name: { contains: query, mode: 'insensitive' } },
-                { description: { contains: query, mode: 'insensitive' } },
-            ];
+        if (query) {
+            const categoryKeywords = Object.values(CATEGORY_KEYWORDS).flat();
+            const queryWithoutCategory = query
+                .split(' ')
+                .filter((w) => !categoryKeywords.includes(w.toLowerCase()))
+                .join(' ')
+                .trim();
+            if (queryWithoutCategory) {
+                where.OR = [
+                    { name: { contains: queryWithoutCategory, mode: 'insensitive' } },
+                    { description: { contains: queryWithoutCategory, mode: 'insensitive' } },
+                ];
+            }
         }
         const skip = (page - 1) * limit;
         const [products, total] = await this.prisma.$transaction([

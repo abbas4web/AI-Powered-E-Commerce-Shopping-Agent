@@ -39,15 +39,22 @@ export class SearchAgent implements IAgent {
     this.logger.debug(`Extracted: ${JSON.stringify(requirements)}`);
 
     // ── Step 2: Search the database deterministically ────────────────────────
+    // For use-case queries like "gaming laptop", also pass the use-case as part
+    // of the query so gaming-specific laptops (with "gaming" in name/description)
+    // are included alongside category-filtered results.
+    const useCaseQuery = requirements.useCases?.length
+      ? `${requirements.query} ${requirements.useCases[0]}`
+      : requirements.query;
+
     const result = await this.searchService.searchProducts({
-      query: requirements.query,
+      query: useCaseQuery,
       minPrice: requirements.minPrice,
       maxPrice: requirements.maxPrice,
       brandName: requirements.brandName,
       limit: 10,
     });
 
-    this.logger.debug(`Found ${result.total} products for query: "${requirements.query}"`);
+    this.logger.debug(`Found ${result.total} products for query: "${useCaseQuery}"`);
 
     // ── Step 3: Map to SlimProduct ───────────────────────────────────────────
     type PrismaProduct = {

@@ -93,6 +93,9 @@ Reply with ONLY the intent name. Nothing else.`;
         const hasRecentSearch = history.some((h) => h.role === 'assistant' && h.content.includes('₹'));
         if (!hasRecentSearch && !previousResults?.length)
             return false;
+        const hasUseCaseChange = /for\s+(gaming|game|graphic[\s-]*design|web[\s-]*dev|development|coding|programming|video[\s-]*editing|photography|business|flutter|android|study|work|office)/i.test(lower);
+        if (hasUseCaseChange)
+            return false;
         const followUpPatterns = [
             /^(which|what).*(best|cheapest|expensive|recommended|good)/,
             /^(in these|among these|from these|out of these)/,
